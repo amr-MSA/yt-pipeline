@@ -1,0 +1,58 @@
+name: Long Pipeline (Telegram → YouTube)
+
+on:
+  schedule:
+    # كل الأوقات بتوقيت UTC. الأصل بتوقيت السعودية (UTC+3):
+    # 04:00=7ص | 09:00=12ظهرًا | 10:00=1م | 11:00=2م | 14:00=5م | 17:00=8م | 19:00=10م | 21:00=12(منتصف الليل)
+    - cron: '0 4 * * *'
+    - cron: '0 9 * * *'
+    - cron: '0 10 * * *'
+    - cron: '0 11 * * *'
+    - cron: '0 14 * * *'
+    - cron: '0 17 * * *'
+    - cron: '0 19 * * *'
+    - cron: '0 21 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: long-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-long-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -q -r requirements.txt
+
+      - name: Run long pipeline
+        working-directory: scripts
+        env:
+          LONG_BOT_TOKEN: ${{ secrets.LONG_BOT_TOKEN }}
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: python long_pipeline.py
+
+      - name: Commit updated state (offsets)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/long_offset.json || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update long bot offset [skip ci]"
+            git push
+          else
+            echo "لا تغييرات في الحالة."
+          fi

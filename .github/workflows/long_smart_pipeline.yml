@@ -1,0 +1,52 @@
+name: Long-Smart Pipeline (Gemini batch publisher)
+
+on:
+  schedule:
+    # تشغيل يومي واحد فقط (وليس 8 مرات كباقي الأنشطة) — ينشر مقطعًا واحدًا
+    # من كل طابور نشط، ضمن حد يومي منفصل (افتراضيًا 8) خاص بهذا الخط فقط.
+    - cron: '0 5 * * *'   # 08:00 بتوقيت السعودية (UTC+3)
+  workflow_dispatch: {}
+
+concurrency:
+  group: long-smart-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-long-smart-batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -q -r requirements.txt
+
+      - name: Run long-smart daily batch
+        working-directory: scripts
+        env:
+          SHORTS_BOT_TOKEN: ${{ secrets.SHORTS_BOT_TOKEN }}
+          YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python long_smart_pipeline.py
+
+      - name: Commit updated state (queues + quota)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/ || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update long-smart queue/quota state [skip ci]"
+            git push
+          else
+            echo "لا تغييرات في الحالة."
+          fi
