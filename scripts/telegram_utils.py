@@ -1,6 +1,6 @@
 """
 أدوات التعامل مع بوت تلجرام: جلب الرسائل الجديدة، استخراج الروابط،
-وحفظ/قراءة آخر update_id تمت معالجته حتى لا نعالج نفس الرسالة مرتين.
+وحفظ/قراءة آخر رسالة تمت معالجتها حتى لا نعالج نفس الرسالة مرتين.
 """
 import json
 import os
@@ -9,13 +9,11 @@ import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
-# نمط للتعرف على روابط يوتيوب (فيديو عادي أو shorts)
 YOUTUBE_URL_RE = re.compile(
     r"(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)[\w-]+|youtu\.be/[\w-]+)[^\s]*)",
     re.IGNORECASE,
 )
 
-# نمط للتعرف على أمر /long متبوعًا برابط يوتيوب (خط الإنتاج الذكي المنفصل)
 LONG_COMMAND_RE = re.compile(
     r"/long(?:@\w+)?\s+"
     r"(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)[\w-]+|youtu\.be/[\w-]+)[^\s]*)",
@@ -46,18 +44,14 @@ def save_offset(state_dir: str, bot_name: str, update_id: int) -> None:
 
 def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
     """
-    يجلب الرسائل الجديدة المرسلة للبوت منذ آخر مرة، ويستخرج منها روابط يوتيوب
-    العادية (بدون أمر /long — تلك تُعالَج بخط منفصل عبر fetch_new_long_commands).
-    يرجع قائمة: [{"url": ..., "chat_id": ..., "message_id": ..., "text": ...}, ...]
-    ويحدّث ملف الـ offset تلقائيًا بعد الجلب (حتى لو ما فيه روابط) حتى لا نعيد قراءة نفس الرسائل.
+    يجلب الرسائل الجديدة منذ آخر تشغيل ويستخرج روابط يوتيوب العادية.
+    يرجع لكل رابط chat_id وmessage_id حتى يمكن حذف رسالة الرابط بعد نجاح الرفع.
     """
     updates = _fetch_updates(bot_token, state_dir, bot_name)
     links = []
-
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
         if LONG_COMMAND_RE.search(text):
-            # هذه رسالة أمر /long، تُعالَج في مكان آخر — نتجاهلها هنا
             continue
         found = YOUTUBE_URL_RE.findall(text)
         for u in found:
@@ -69,22 +63,16 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
                     "text": text.strip(),
                 }
             )
-
     return links
 
 
 def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tuple[list[dict], list[dict]]:
     """
-    يجلب دفعة واحدة من التحديثات الجديدة ويفرزها إلى (روابط_عادية، أوامر_long)
-    في استدعاء واحد فقط، حتى لا يتضارب استهلاك offset بين دالتين منفصلتين.
-
-    استخدم هذه الدالة (وليس fetch_new_links) في أي بوت يحتاج التقاط أمر /long
-    بالإضافة إلى الروابط العادية في نفس التشغيل.
+    يجلب دفعة واحدة من التحديثات الجديدة ويفرزها إلى (روابط عادية، أوامر_long).
     """
     updates = _fetch_updates(bot_token, state_dir, bot_name)
     links = []
     long_commands = []
-
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
         m = LONG_COMMAND_RE.search(text)
@@ -107,7 +95,6 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
                     "text": text.strip(),
                 }
             )
-
     return links, long_commands
 
 
@@ -119,9 +106,8 @@ def _iter_messages(updates: list[dict]):
 
 
 def _fetch_updates(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
-    """يجلب التحديثات الخام من تلجرام ويحدّث الـ offset. يُستخدم داخليًا فقط."""
+    """يجلب التحديثات الخام من تلجرام ويحدّث الـ offset."""
     last_offset = load_offset(state_dir, bot_name)
-
     url = TELEGRAM_API.format(token=bot_token, method="getUpdates")
     params = {"offset": last_offset + 1, "timeout": 0, "limit": 100}
     resp = requests.get(url, params=params, timeout=30)
@@ -130,7 +116,6 @@ def _fetch_updates(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
 
     if not data.get("ok"):
         raise RuntimeError(f"فشل استدعاء Telegram API: {data}")
-
     updates = data.get("result", [])
     if updates:
         max_update_id = max(upd["update_id"] for upd in updates)
@@ -141,7 +126,7 @@ def _fetch_updates(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
 
 
 def send_message(bot_token: str, chat_id: int, text: str) -> None:
-    """يرسل رسالة نصية للمستخدم (تأكيد نجاح/فشل مثلاً)."""
+    """يرسل رسالة نصية للمستخدم."""
     url = TELEGRAM_API.format(token=bot_token, method="sendMessage")
     try:
         requests.post(
@@ -150,5 +135,31 @@ def send_message(bot_token: str, chat_id: int, text: str) -> None:
             timeout=15,
         )
     except Exception:
-        # لا نوقف السير إذا فشل إرسال رسالة التأكيد فقط
         pass
+
+
+def delete_message(bot_token: str, chat_id: int, message_id: int) -> bool:
+    """
+    يحذف رسالة الرابط من تلجرام.
+    الفشل هنا لا يوقف خط الإنتاج؛ رفع الفيديو يكون قد نجح بالفعل.
+    Telegram يسمح للبوت بحذف الرسائل الواردة في المحادثات الخاصة، مع قيود
+    منها حد 48 ساعة على عمر الرسالة.
+    """
+    url = TELEGRAM_API.format(token=bot_token, method="deleteMessage")
+    try:
+        resp = requests.post(
+            url,
+            json={"chat_id": chat_id, "message_id": message_id},
+            timeout=15,
+        )
+        if not resp.ok:
+            print(f"⚠️ تعذر حذف رسالة Telegram {message_id}: HTTP {resp.status_code}")
+            return False
+        data = resp.json()
+        if not data.get("ok"):
+            print(f"⚠️ تعذر حذف رسالة Telegram {message_id}: {data}")
+            return False
+        return True
+    except Exception as exc:
+        print(f"⚠️ تعذر حذف رسالة Telegram {message_id}: {exc}")
+        return False

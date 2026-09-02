@@ -1,9 +1,10 @@
 """
 سير عمل بوت "لونق":
 1. يفحص بوت تلجرام لأي روابط يوتيوب جديدة أُرسلت إليه.
-2. لكل رابط: يحمّل الفيديو كاملًا.
+2. لكل رابط: يحمّل أفضل جودة متاحة مناسبة كملف MP4 (فيديو + صوت).
 3. ينشره على قناة يوتيوب الخاصة بك كفيديو عام (public).
-4. يرسل تأكيد نجاح/فشل في تلجرام، وينظّف الملفات المؤقتة.
+4. بعد نجاح الرفع، يحذف رسالة الرابط من تلجرام ثم ينظف الملف المحلي.
+5. إذا فشل التحميل أو الرفع، لا يحذف رسالة الرابط حتى تبقى قابلة للمراجعة.
 """
 import os
 import sys
@@ -12,7 +13,7 @@ import traceback
 import yt_dlp
 from googleapiclient.http import MediaFileUpload
 
-from telegram_utils import fetch_new_links, send_message
+from telegram_utils import fetch_new_links, send_message, delete_message
 from youtube_auth import get_youtube_client
 
 STATE_DIR = "state"
@@ -20,10 +21,15 @@ DOWNLOAD_DIR = "downloads_long"
 BOT_NAME = "long"
 
 
-def download_video(url: str, out_path: str) -> None:
+def download_video(url: str, out_path: str) -> dict:
+    """
+    يحمّل أعلى جودة مناسبة: أفضل فيديو MP4 + أفضل صوت M4A متى توفرا،
+    مع fallback لأفضل صيغة متاحة، ثم يدمجهما في حاوية MP4 عبر ffmpeg.
+    """
     ydl_opts = {
-        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
         "outtmpl": out_path,
+        "merge_output_format": "mp4",
         "overwrites": True,
         "quiet": True,
         "noprogress": True,
@@ -36,8 +42,7 @@ def download_video(url: str, out_path: str) -> None:
         ydl_opts["cookiefile"] = cookie_path
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-    return info
+        return ydl.extract_info(url, download=True)
 
 
 def upload_video(youtube, file_path: str, title: str, description: str) -> str:
@@ -78,41 +83,56 @@ def main():
     for idx, item in enumerate(links, 1):
         url = item["url"]
         chat_id = item["chat_id"]
+        message_id = item["message_id"]
         print(f"\n{'='*50}\n[{idx}/{len(links)}] معالجة: {url}")
         raw_path = os.path.join(DOWNLOAD_DIR, f"video_{idx}.mp4")
 
         try:
-            print("⬇️ تحميل الفيديو...")
+            print("⬇️ تحميل أعلى جودة مناسبة MP4...")
             info = download_video(url, raw_path)
             title = info.get("title", "فيديو جديد")
             desc = info.get("description", "") or ""
-
             actual_file = raw_path
+
             if not os.path.exists(actual_file):
-                # yt-dlp قد يضيف امتداد مختلف
                 candidates = [
                     f for f in os.listdir(DOWNLOAD_DIR) if f.startswith(f"video_{idx}")
                 ]
                 if candidates:
                     actual_file = os.path.join(DOWNLOAD_DIR, candidates[0])
 
+            if not os.path.isfile(actual_file):
+                raise FileNotFoundError("yt-dlp لم ينتج ملف الفيديو المتوقع.")
+
             print("📤 رفع على يوتيوب (public)...")
             video_id = upload_video(youtube, actual_file, title, desc)
             video_url = f"https://youtu.be/{video_id}"
             print(f"✅ تم النشر: {video_url}")
 
+            # لا نحذف رسالة المستخدم إلا بعد تأكيد نجاح الرفع والحصول على video_id.
+            if delete_message(bot_token, chat_id, message_id):
+                print(f"🗑️ تم حذف رسالة Telegram: {message_id}")
+            else:
+                print(
+                    f"⚠️ نجح الرفع لكن تعذر حذف رسالة Telegram: {message_id}. "
+                    "لن نعتبر الرفع فاشلًا."
+                )
+
             send_message(
                 bot_token, chat_id, f"✅ تم نشر الفيديو بنجاح:\n{video_url}"
             )
-
         except Exception as e:
             err = f"{e}"
             print(f"❌ فشل: {err}")
             traceback.print_exc()
-            send_message(bot_token, chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
+            send_message(
+                bot_token,
+                chat_id,
+                f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}",
+            )
 
         finally:
-            # تنظيف فوري لأي ملفات مؤقتة لهذا العنصر
+            # تنظيف فوري لأي ملفات مؤقتة لهذا العنصر، سواء نجح أو فشل.
             for f in os.listdir(DOWNLOAD_DIR):
                 try:
                     os.remove(os.path.join(DOWNLOAD_DIR, f))

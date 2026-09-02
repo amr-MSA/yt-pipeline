@@ -1,4 +1,4 @@
-yt-dlp>=2024.8.6
+yt-dlp[default]>=2024.8.6
 google-auth>=2.29.0
 google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
