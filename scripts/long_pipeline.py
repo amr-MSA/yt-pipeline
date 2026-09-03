@@ -1,10 +1,10 @@
 """
 سير عمل بوت "لونق":
 1. يفحص بوت تلجرام لأي روابط يوتيوب جديدة أُرسلت إليه.
-2. لكل رابط: يحمّل أفضل جودة متاحة مناسبة كملف MP4 (فيديو + صوت).
+2. لكل رسالة رابط: يحمّل الفيديو كاملًا.
 3. ينشره على قناة يوتيوب الخاصة بك كفيديو عام (public).
-4. بعد نجاح الرفع، يحذف رسالة الرابط من تلجرام ثم ينظف الملف المحلي.
-5. إذا فشل التحميل أو الرفع، لا يحذف رسالة الرابط حتى تبقى قابلة للمراجعة.
+4. بعد تأكيد videoId فقط، يحذف رسالة الرابط من Telegram.
+5. يحتفظ بنجاح الرفع إذا تعذر الحذف حتى لا يعاد رفع الفيديو.
 """
 import os
 import sys
@@ -13,7 +13,14 @@ import traceback
 import yt_dlp
 from googleapiclient.http import MediaFileUpload
 
-from telegram_utils import fetch_new_links, send_message, delete_message
+from telegram_utils import (
+    delete_message,
+    fetch_new_links,
+    load_uploaded_messages,
+    message_key,
+    save_uploaded_messages,
+    send_message,
+)
 from youtube_auth import get_youtube_client
 
 STATE_DIR = "state"
@@ -22,10 +29,6 @@ BOT_NAME = "long"
 
 
 def download_video(url: str, out_path: str) -> dict:
-    """
-    يحمّل أعلى جودة مناسبة: أفضل فيديو MP4 + أفضل صوت M4A متى توفرا،
-    مع fallback لأفضل صيغة متاحة، ثم يدمجهما في حاوية MP4 عبر ffmpeg.
-    """
     ydl_opts = {
         "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
         "outtmpl": out_path,
@@ -33,6 +36,8 @@ def download_video(url: str, out_path: str) -> dict:
         "overwrites": True,
         "quiet": True,
         "noprogress": True,
+        # Deno هو runtime الموصى به لـ EJS، وتثبيت yt-dlp[default] يوفر yt-dlp-ejs.
+        "js_runtimes": {"deno": {}},
     }
     cookies_env = os.environ.get("YT_COOKIES")
     if cookies_env:
@@ -60,7 +65,22 @@ def upload_video(youtube, file_path: str, title: str, description: str) -> str:
         media_body=MediaFileUpload(file_path, resumable=True),
     )
     response = request.execute()
-    return response["id"]
+    video_id = response.get("id")
+    if not video_id:
+        raise RuntimeError("نجح طلب YouTube دون إرجاع videoId؛ لن تُحذف رسالة Telegram")
+    return video_id
+
+
+def reconcile_uploaded_messages(bot_token: str, uploaded: dict) -> dict:
+    """يحاول حذف الرسائل التي نجح رفعها في تشغيل سابق ولم يُحذف أصلها بعد."""
+    pending = dict(uploaded)
+    for key, item in list(pending.items()):
+        if delete_message(bot_token, item["chat_id"], item["message_id"]):
+            print(f"🗑️ تم حذف رسالة Telegram المؤكدة سابقًا: {key}")
+            pending.pop(key, None)
+        else:
+            print(f"⚠️ تعذر حذف رسالة Telegram بعد رفع مؤكد، ستتم إعادة المحاولة: {key}")
+    return pending
 
 
 def main():
@@ -69,6 +89,12 @@ def main():
 
     os.makedirs(STATE_DIR, exist_ok=True)
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    uploaded = load_uploaded_messages(STATE_DIR, BOT_NAME)
+    reconciled = reconcile_uploaded_messages(bot_token, uploaded)
+    if reconciled != uploaded:
+        save_uploaded_messages(STATE_DIR, BOT_NAME, reconciled)
+    uploaded = reconciled
 
     print("🔎 جاري فحص رسائل بوت لونق الجديدة...")
     links = fetch_new_links(bot_token, STATE_DIR, BOT_NAME)
@@ -84,16 +110,25 @@ def main():
         url = item["url"]
         chat_id = item["chat_id"]
         message_id = item["message_id"]
-        print(f"\n{'='*50}\n[{idx}/{len(links)}] معالجة: {url}")
+        key = message_key(item)
+        print(f"\n{'='*50}\n[{idx}/{len(links)}] معالجة: {url} (message={message_id})")
         raw_path = os.path.join(DOWNLOAD_DIR, f"video_{idx}.mp4")
 
         try:
-            print("⬇️ تحميل أعلى جودة مناسبة MP4...")
+            # قد تكون الرسالة عادت من دفعة قديمة؛ لا نعيد الرفع إذا كان النجاح مسجلاً.
+            if key in uploaded:
+                print(f"ℹ️ الرفع مسجل مسبقًا لهذه الرسالة؛ لن يعاد رفعها: {key}")
+                if delete_message(bot_token, chat_id, message_id):
+                    uploaded.pop(key, None)
+                    save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+                continue
+
+            print("⬇️ تحميل الفيديو...")
             info = download_video(url, raw_path)
             title = info.get("title", "فيديو جديد")
             desc = info.get("description", "") or ""
-            actual_file = raw_path
 
+            actual_file = raw_path
             if not os.path.exists(actual_file):
                 candidates = [
                     f for f in os.listdir(DOWNLOAD_DIR) if f.startswith(f"video_{idx}")
@@ -107,32 +142,33 @@ def main():
             print("📤 رفع على يوتيوب (public)...")
             video_id = upload_video(youtube, actual_file, title, desc)
             video_url = f"https://youtu.be/{video_id}"
-            print(f"✅ تم النشر: {video_url}")
+            print(f"✅ تم النشر وتأكيد videoId: {video_url}")
 
-            # لا نحذف رسالة المستخدم إلا بعد تأكيد نجاح الرفع والحصول على video_id.
+            # يُحفظ النجاح قبل الحذف. إذا فشل الحذف فلن يؤدي التشغيل التالي إلى إعادة الرفع.
+            uploaded[key] = {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "video_id": video_id,
+                "url": url,
+            }
+            save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+
             if delete_message(bot_token, chat_id, message_id):
-                print(f"🗑️ تم حذف رسالة Telegram: {message_id}")
+                uploaded.pop(key, None)
+                save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+                print(f"🗑️ حُذفت رسالة الرابط بعد نجاح الرفع: {message_id}")
             else:
-                print(
-                    f"⚠️ نجح الرفع لكن تعذر حذف رسالة Telegram: {message_id}. "
-                    "لن نعتبر الرفع فاشلًا."
-                )
+                print(f"⚠️ نجح الرفع لكن تعذر حذف الرسالة؛ لن يعاد الرفع: {message_id}")
 
-            send_message(
-                bot_token, chat_id, f"✅ تم نشر الفيديو بنجاح:\n{video_url}"
-            )
+            send_message(bot_token, chat_id, f"✅ تم نشر الفيديو بنجاح:\n{video_url}")
+
         except Exception as e:
             err = f"{e}"
             print(f"❌ فشل: {err}")
             traceback.print_exc()
-            send_message(
-                bot_token,
-                chat_id,
-                f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}",
-            )
+            send_message(bot_token, chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
 
         finally:
-            # تنظيف فوري لأي ملفات مؤقتة لهذا العنصر، سواء نجح أو فشل.
             for f in os.listdir(DOWNLOAD_DIR):
                 try:
                     os.remove(os.path.join(DOWNLOAD_DIR, f))

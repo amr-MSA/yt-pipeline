@@ -1,6 +1,6 @@
 """
-أدوات التعامل مع بوت تلجرام: جلب الرسائل الجديدة، استخراج الروابط،
-وحفظ/قراءة آخر رسالة تمت معالجتها حتى لا نعالج نفس الرسالة مرتين.
+أدوات التعامل مع بوت تلجرام: جلب الرسائل، استخراج الروابط، وإدارة رسائل
+الروابط التي تمت معالجتها بنجاح.
 """
 import json
 import os
@@ -9,11 +9,13 @@ import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
+# نمط للتعرف على روابط يوتيوب (فيديو عادي أو shorts)
 YOUTUBE_URL_RE = re.compile(
     r"(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)[\w-]+|youtu\.be/[\w-]+)[^\s]*)",
     re.IGNORECASE,
 )
 
+# نمط للتعرف على أمر /long متبوعًا برابط يوتيوب (خط الإنتاج الذكي المنفصل)
 LONG_COMMAND_RE = re.compile(
     r"/long(?:@\w+)?\s+"
     r"(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)[\w-]+|youtu\.be/[\w-]+)[^\s]*)",
@@ -43,18 +45,15 @@ def save_offset(state_dir: str, bot_name: str, update_id: int) -> None:
 
 
 def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
-    """
-    يجلب الرسائل الجديدة منذ آخر تشغيل ويستخرج روابط يوتيوب العادية.
-    يرجع لكل رابط chat_id وmessage_id حتى يمكن حذف رسالة الرابط بعد نجاح الرفع.
-    """
+    """يجلب الروابط الجديدة، مع إبقاء كل رسالة كعنصر مستقل حتى عند تكرار الرابط."""
     updates = _fetch_updates(bot_token, state_dir, bot_name)
     links = []
+
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
         if LONG_COMMAND_RE.search(text):
             continue
-        found = YOUTUBE_URL_RE.findall(text)
-        for u in found:
+        for u in YOUTUBE_URL_RE.findall(text):
             links.append(
                 {
                     "url": u,
@@ -63,16 +62,16 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
                     "text": text.strip(),
                 }
             )
+
     return links
 
 
 def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tuple[list[dict], list[dict]]:
-    """
-    يجلب دفعة واحدة من التحديثات الجديدة ويفرزها إلى (روابط عادية، أوامر_long).
-    """
+    """يجلب دفعة واحدة ويفرزها إلى روابط عادية وأوامر /long."""
     updates = _fetch_updates(bot_token, state_dir, bot_name)
     links = []
     long_commands = []
+
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
         m = LONG_COMMAND_RE.search(text)
@@ -95,6 +94,7 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
                     "text": text.strip(),
                 }
             )
+
     return links, long_commands
 
 
@@ -106,7 +106,7 @@ def _iter_messages(updates: list[dict]):
 
 
 def _fetch_updates(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
-    """يجلب التحديثات الخام من تلجرام ويحدّث الـ offset."""
+    """يجلب التحديثات الخام ويحدّث offset بعد الجلب."""
     last_offset = load_offset(state_dir, bot_name)
     url = TELEGRAM_API.format(token=bot_token, method="getUpdates")
     params = {"offset": last_offset + 1, "timeout": 0, "limit": 100}
@@ -116,17 +116,17 @@ def _fetch_updates(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
 
     if not data.get("ok"):
         raise RuntimeError(f"فشل استدعاء Telegram API: {data}")
+
     updates = data.get("result", [])
     if updates:
         max_update_id = max(upd["update_id"] for upd in updates)
-        max_update_id = max(max_update_id, last_offset)
-        save_offset(state_dir, bot_name, max_update_id)
+        save_offset(state_dir, bot_name, max(max_update_id, last_offset))
 
     return updates
 
 
 def send_message(bot_token: str, chat_id: int, text: str) -> None:
-    """يرسل رسالة نصية للمستخدم."""
+    """يرسل رسالة نصية ولا يوقف السير إذا فشل الإشعار."""
     url = TELEGRAM_API.format(token=bot_token, method="sendMessage")
     try:
         requests.post(
@@ -139,27 +139,46 @@ def send_message(bot_token: str, chat_id: int, text: str) -> None:
 
 
 def delete_message(bot_token: str, chat_id: int, message_id: int) -> bool:
-    """
-    يحذف رسالة الرابط من تلجرام.
-    الفشل هنا لا يوقف خط الإنتاج؛ رفع الفيديو يكون قد نجح بالفعل.
-    Telegram يسمح للبوت بحذف الرسائل الواردة في المحادثات الخاصة، مع قيود
-    منها حد 48 ساعة على عمر الرسالة.
-    """
+    """يحذف رسالة Telegram ويعيد True فقط إذا أكد API نجاح الحذف."""
     url = TELEGRAM_API.format(token=bot_token, method="deleteMessage")
     try:
-        resp = requests.post(
+        response = requests.post(
             url,
             json={"chat_id": chat_id, "message_id": message_id},
             timeout=15,
         )
-        if not resp.ok:
-            print(f"⚠️ تعذر حذف رسالة Telegram {message_id}: HTTP {resp.status_code}")
-            return False
-        data = resp.json()
-        if not data.get("ok"):
-            print(f"⚠️ تعذر حذف رسالة Telegram {message_id}: {data}")
-            return False
-        return True
-    except Exception as exc:
-        print(f"⚠️ تعذر حذف رسالة Telegram {message_id}: {exc}")
+        response.raise_for_status()
+        data = response.json()
+        return bool(data.get("ok"))
+    except (requests.RequestException, ValueError):
         return False
+
+
+def upload_state_path(state_dir: str, bot_name: str) -> str:
+    return os.path.join(state_dir, f"{bot_name}_uploaded_messages.json")
+
+
+def load_uploaded_messages(state_dir: str, bot_name: str) -> dict:
+    path = upload_state_path(state_dir, bot_name)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_uploaded_messages(state_dir: str, bot_name: str, state: dict) -> None:
+    """يحفظ سجل النجاح قبل محاولة الحذف لمنع إعادة الرفع بعد فشل الحذف."""
+    os.makedirs(state_dir, exist_ok=True)
+    path = upload_state_path(state_dir, bot_name)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
+
+
+def message_key(item: dict) -> str:
+    return f"{item['chat_id']}:{item['message_id']}"
