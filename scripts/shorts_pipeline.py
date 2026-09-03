@@ -139,6 +139,18 @@ def main():
             print(f"ℹ️ أمر /long مسجل مسبقًا ({record.get('status')})؛ تم تجاوزه: {key}")
             continue
         unique_long_commands.append(item)
+    for key, record in ledger.items():
+        if record.get("status") != "failed_retryable" or record.get("stage") != "analysis_failed" or key in seen_command_keys:
+            continue
+        if not record.get("source_url") or "chat_id" not in record or "message_id" not in record:
+            continue
+        seen_command_keys.add(key)
+        unique_long_commands.append({
+            "url": record["source_url"],
+            "chat_id": record["chat_id"],
+            "message_id": record["message_id"],
+            "text": f"/long {record['source_url']}",
+        })
     long_commands = unique_long_commands
 
     # نسجل أوامر /long قبل التحليل أيضًا؛ تكرار الرابط لا يسبب سحب transcript جديدًا.
@@ -169,6 +181,19 @@ def main():
             print(f"⚠️ حالة الرفع غير محسومة لرسالة سابقة؛ تم تجاوزها بأمان: {key}")
             continue
         unique_links.append(item)
+    # الـ offset يمنع Telegram من إعادة الرسالة؛ نعيد فقط ما فشل قبل الرفع.
+    for key, record in ledger.items():
+        if record.get("status") != "failed_retryable" or key in seen_keys:
+            continue
+        if not record.get("source_url") or "chat_id" not in record or "message_id" not in record:
+            continue
+        seen_keys.add(key)
+        unique_links.append({
+            "url": record["source_url"],
+            "chat_id": record["chat_id"],
+            "message_id": record["message_id"],
+            "text": record.get("source_url", ""),
+        })
     links = unique_links
 
     # أوامر /long <رابط>: تذهب لخط إنتاج منفصل تمامًا (ترانسكريبت → جيمناي → طابور 8 مقاطع)
