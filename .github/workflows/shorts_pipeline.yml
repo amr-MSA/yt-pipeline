@@ -2,15 +2,16 @@ name: Shorts Pipeline (Telegram → YouTube)
 
 on:
   schedule:
-    # نفس أوقات لونق (يمكن تعديلها لاحقًا لتكون مختلفة إذا أردت)
-    - cron: '0 4 * * *'
-    - cron: '0 9 * * *'
-    - cron: '0 10 * * *'
-    - cron: '0 11 * * *'
-    - cron: '0 14 * * *'
-    - cron: '0 17 * * *'
-    - cron: '0 19 * * *'
-    - cron: '0 21 * * *'
+    # نفس أوقات لونق تقريبًا، لكن بفارق دقيقتين لتقليل احتمال تصادم
+    # الـ push مع سير لونق (كلاهما يعدّل ملفات state/ في نفس اللحظة تقريبًا).
+    - cron: '2 4 * * *'
+    - cron: '2 9 * * *'
+    - cron: '2 10 * * *'
+    - cron: '2 11 * * *'
+    - cron: '2 14 * * *'
+    - cron: '2 17 * * *'
+    - cron: '2 19 * * *'
+    - cron: '2 21 * * *'
   workflow_dispatch: {}
 
 concurrency:
@@ -47,12 +48,28 @@ jobs:
 
       - name: Commit updated state (offsets + long-smart queues)
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add state/ || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update shorts bot offset / long-smart queues [skip ci]"
-            git push
-          else
+          if git diff --cached --quiet; then
             echo "لا تغييرات في الحالة."
+            exit 0
           fi
+          git commit -m "chore: update shorts bot offset / long-smart queues [skip ci]"
+
+          # قد تكون هناك تشغيلة أخرى (لونق) عملت push في نفس الوقت بالضبط
+          # (نفس جدول الـ cron)، لذلك نعيد المحاولة بدل فشل صامت يُضيّع الـ offset الجديد.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "✅ تم رفع تحديث الحالة."
+              exit 0
+            fi
+            echo "⚠️ فشل push (محاولة $i)، جاري git pull --rebase وإعادة المحاولة..."
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; git reset --hard HEAD~1; git merge origin/main -m "merge state"; git add state/; git commit -m "chore: update shorts bot offset / long-smart queues [skip ci]"; }
+            sleep 3
+          done
+
+          echo "❌ فشل رفع تحديث الحالة بعد عدة محاولات." >&2
+          exit 1

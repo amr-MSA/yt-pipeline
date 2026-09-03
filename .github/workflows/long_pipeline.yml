@@ -52,12 +52,28 @@ jobs:
 
       - name: Commit updated state (offsets)
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add state/long_offset.json || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update long bot offset [skip ci]"
-            git push
-          else
+          if git diff --cached --quiet; then
             echo "لا تغييرات في الحالة."
+            exit 0
           fi
+          git commit -m "chore: update long bot offset [skip ci]"
+
+          # قد تكون هناك تشغيلة أخرى (شورتس/لونق) عملت push في نفس الوقت،
+          # لذلك نعيد المحاولة مع rebase بدل ما نسمح بفشل صامت يُضيّع الـ offset الجديد.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "✅ تم رفع تحديث الحالة."
+              exit 0
+            fi
+            echo "⚠️ فشل push (محاولة $i)، جاري git pull --rebase وإعادة المحاولة..."
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; git reset --hard HEAD~1; git merge origin/main -m "merge state"; git add state/long_offset.json; git commit -m "chore: update long bot offset [skip ci]"; }
+            sleep 3
+          done
+
+          echo "❌ فشل رفع تحديث الحالة بعد عدة محاولات." >&2
+          exit 1
