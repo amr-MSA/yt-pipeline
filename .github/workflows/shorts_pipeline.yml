@@ -46,7 +46,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python shorts_pipeline.py
 
-      - name: Commit updated state (offsets + long-smart queues)
+      - name: Commit updated state (offsets + message ledger + long-smart queues)
+        if: always()
         run: |
           set -e
           git config user.name "github-actions[bot]"

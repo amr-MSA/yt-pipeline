@@ -15,7 +15,13 @@ import traceback
 import yt_dlp
 from googleapiclient.http import MediaFileUpload
 
-from telegram_utils import fetch_all_new_messages, send_message
+from telegram_utils import (
+    fetch_all_new_messages,
+    load_message_ledger,
+    message_key,
+    save_message_ledger,
+    send_message,
+)
 from youtube_auth import get_youtube_client
 import long_smart_pipeline
 
@@ -120,13 +126,64 @@ def main():
     print("🔎 جاري فحص رسائل بوت شورتس الجديدة...")
     links, long_commands = fetch_all_new_messages(bot_token, STATE_DIR, BOT_NAME)
 
+    ledger = load_message_ledger(STATE_DIR, BOT_NAME)
+    unique_long_commands = []
+    seen_command_keys = set()
+    for item in long_commands:
+        key = message_key(item)
+        if key in seen_command_keys:
+            continue
+        seen_command_keys.add(key)
+        record = ledger.get(key, {})
+        if record.get("status") in {"succeeded", "upload_unknown", "processing"}:
+            print(f"ℹ️ أمر /long مسجل مسبقًا ({record.get('status')})؛ تم تجاوزه: {key}")
+            continue
+        unique_long_commands.append(item)
+    long_commands = unique_long_commands
+
+    # نسجل أوامر /long قبل التحليل أيضًا؛ تكرار الرابط لا يسبب سحب transcript جديدًا.
+    for item in long_commands:
+        key = message_key(item)
+        ledger[key] = {
+            "status": "processing",
+            "stage": "analyzing_long",
+            "chat_id": item["chat_id"],
+            "message_id": item["message_id"],
+            "source_url": item["url"],
+        }
+    if long_commands:
+        save_message_ledger(STATE_DIR, BOT_NAME, ledger)
+    # لا نعالج نفس رسالة Telegram مرتين حتى لو عاد offset إلى الخلف أو تكرر الرابط.
+    unique_links = []
+    seen_keys = set()
+    for item in links:
+        key = message_key(item)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        record = ledger.get(key, {})
+        if record.get("status") in {"succeeded", "upload_unknown"}:
+            print(f"ℹ️ الرسالة مسجلة مسبقًا ({record['status']})؛ لن يعاد رفعها: {key}")
+            continue
+        if record.get("status") == "processing":
+            print(f"⚠️ حالة الرفع غير محسومة لرسالة سابقة؛ تم تجاوزها بأمان: {key}")
+            continue
+        unique_links.append(item)
+    links = unique_links
+
     # أوامر /long <رابط>: تذهب لخط إنتاج منفصل تمامًا (ترانسكريبت → جيمناي → طابور 8 مقاطع)
     if long_commands:
         print(f"🧠 تم العثور على {len(long_commands)} أمر /long جديد.")
-        long_smart_pipeline.handle_new_long_commands(
+        long_results = long_smart_pipeline.handle_new_long_commands(
             bot_token=bot_token,
             long_commands=long_commands,
         )
+        for item in long_commands:
+            key = message_key(item)
+            result = long_results.get(key, "failed_retryable")
+            ledger[key]["status"] = result
+            ledger[key]["stage"] = "queue_created" if result == "succeeded" else "analysis_failed"
+        save_message_ledger(STATE_DIR, BOT_NAME, ledger)
 
     if not links:
         print("📭 لا توجد روابط شورتس عادية جديدة. إنهاء.")
@@ -138,10 +195,21 @@ def main():
     for idx, item in enumerate(links, 1):
         url = item["url"]
         chat_id = item["chat_id"]
+        key = message_key(item)
         print(f"\n{'='*50}\n[{idx}/{len(links)}] معالجة: {url}")
 
         raw_path = os.path.join(DOWNLOAD_DIR, f"raw_{idx}.mp4")
         final_path = os.path.join(DOWNLOAD_DIR, f"final_{idx}.mp4")
+
+        # الحجز قبل أي تنزيل يمنع تشغيلًا لاحقًا من إعادة معالجة الرسالة.
+        ledger[key] = {
+            "status": "processing",
+            "stage": "downloading",
+            "chat_id": chat_id,
+            "message_id": item["message_id"],
+            "source_url": url,
+        }
+        save_message_ledger(STATE_DIR, BOT_NAME, ledger)
 
         try:
             print(f"⬇️ تحميل أول {CLIP_END} ثانية...")
@@ -161,10 +229,24 @@ def main():
             merged = apply_template(actual_raw, final_path)
             upload_file = final_path if merged else actual_raw
 
+            ledger[key]["stage"] = "uploading"
+            save_message_ledger(STATE_DIR, BOT_NAME, ledger)
             print("📤 رفع على يوتيوب (public)...")
             video_id = upload_video(youtube, upload_file, f"{title} #Shorts", desc)
             video_url = f"https://youtu.be/{video_id}"
             print(f"✅ تم النشر: {video_url}")
+
+            # نثبت نجاح الرفع قبل الإشعار؛ لن يعاد الرفع حتى لو فشل ما بعده.
+            ledger[key] = {
+                "status": "succeeded",
+                "stage": "uploaded",
+                "chat_id": chat_id,
+                "message_id": item["message_id"],
+                "source_url": url,
+                "video_id": video_id,
+                "video_url": video_url,
+            }
+            save_message_ledger(STATE_DIR, BOT_NAME, ledger)
 
             send_message(
                 bot_token, chat_id, f"✅ تم نشر الشورت بنجاح:\n{video_url}"
@@ -174,6 +256,12 @@ def main():
             err = f"{e}"
             print(f"❌ فشل: {err}")
             traceback.print_exc()
+            # قد يعني الخطأ أثناء الطلب أن YouTube استلم الفيديو دون رد واضح.
+            # لا نعيد المحاولة تلقائيًا في هذه الحالة لتجنب فيديو مكرر.
+            stage = ledger.get(key, {}).get("stage")
+            ledger[key]["status"] = "upload_unknown" if stage == "uploading" else "failed_retryable"
+            ledger[key]["error"] = err[:500]
+            save_message_ledger(STATE_DIR, BOT_NAME, ledger)
             send_message(bot_token, chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
 
         finally:

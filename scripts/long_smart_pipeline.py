@@ -53,17 +53,19 @@ SHORTS_OUTPUT_W, SHORTS_OUTPUT_H = 1080, 1920
 # المرحلة أ: استقبال أوامر /long جديدة → ترانسكريبت → جيمناي → حفظ طابور
 # ---------------------------------------------------------------------------
 
-def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> None:
+def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[str, str]:
+    results = {}
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     if not gemini_api_key:
         for cmd in long_commands:
+            results[f"{cmd['chat_id']}:{cmd['message_id']}"] = "failed_retryable"
             send_message(
                 bot_token,
                 cmd["chat_id"],
                 "❌ لم يتم إعداد GEMINI_API_KEY على الخادم — لا يمكن معالجة أمر /long.",
             )
         print("❌ GEMINI_API_KEY غير موجود في متغيرات البيئة.")
-        return
+        return results
 
     cookies_env = os.environ.get("YT_COOKIES")
     os.makedirs(WORK_DIR, exist_ok=True)
@@ -71,6 +73,7 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> None:
     for idx, cmd in enumerate(long_commands, 1):
         url = cmd["url"]
         chat_id = cmd["chat_id"]
+        key = f"{chat_id}:{cmd['message_id']}"
         print(f"\n{'='*50}\n[/long {idx}/{len(long_commands)}] معالجة: {url}")
 
         try:
@@ -79,6 +82,7 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> None:
             video_id = transcript["video_id"]
 
             if queue_utils.queue_exists(STATE_DIR, video_id):
+                results[key] = "succeeded"
                 send_message(
                     bot_token, chat_id,
                     f"ℹ️ هذا الفيديو سبق معالجته بأمر /long، الطابور موجود مسبقًا:\n{url}",
@@ -97,6 +101,7 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> None:
                 chat_id=chat_id,
                 clips=clips,
             )
+            results[key] = "succeeded"
 
             send_message(
                 bot_token, chat_id,
@@ -110,10 +115,13 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> None:
             err = f"{e}"
             print(f"❌ فشل تحليل /long: {err}")
             traceback.print_exc()
+            results[key] = "failed_retryable"
             send_message(
                 bot_token, chat_id,
                 f"❌ فشلت معالجة أمر /long للرابط:\n{url}\n\nالخطأ: {err[:300]}",
             )
+
+    return results
 
 
 # ---------------------------------------------------------------------------

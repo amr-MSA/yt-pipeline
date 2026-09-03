@@ -182,3 +182,30 @@ def save_uploaded_messages(state_dir: str, bot_name: str, state: dict) -> None:
 
 def message_key(item: dict) -> str:
     return f"{item['chat_id']}:{item['message_id']}"
+
+
+def message_ledger_path(state_dir: str, bot_name: str) -> str:
+    return os.path.join(state_dir, f"{bot_name}_message_ledger.json")
+
+
+def load_message_ledger(state_dir: str, bot_name: str) -> dict:
+    """يقرأ سجل الرسائل؛ السجل طبقة حماية إضافية بجانب Telegram offset."""
+    path = message_ledger_path(state_dir, bot_name)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_message_ledger(state_dir: str, bot_name: str, ledger: dict) -> None:
+    """يحفظ السجل باستبدال ذري حتى لا ينتج ملف JSON جزئي."""
+    os.makedirs(state_dir, exist_ok=True)
+    path = message_ledger_path(state_dir, bot_name)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(ledger, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
