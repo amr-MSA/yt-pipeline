@@ -18,6 +18,7 @@ from googleapiclient.http import MediaFileUpload
 from telegram_utils import (
     fetch_all_new_messages,
     load_message_ledger,
+    merge_latest_state,
     message_key,
     save_message_ledger,
     send_message,
@@ -295,6 +296,13 @@ def main():
                     os.remove(os.path.join(DOWNLOAD_DIR, f))
                 except OSError:
                     pass
+
+    # دمج احتياطي أخير مع أحدث state/ من origin/main (انظر نفس المنطق في
+    # long_pipeline.py) لمنع فقدان تسجيلات نجاح بسبب تعارض push موازٍ.
+    try:
+        merge_latest_state(STATE_DIR, BOT_NAME)
+    except Exception as e:
+        print(f"⚠️ تحذير: فشل الدمج الاحتياطي النهائي للحالة: {e}")
 
     print("\n🎉 انتهت معالجة سير شورتس.")
 

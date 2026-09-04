@@ -73,6 +73,13 @@ jobs:
           git commit -m "chore: update long bot state [skip ci]"
 
           # إعادة المحاولة إذا سبقتنا تشغيلة أخرى في تحديث main.
+          # ملاحظة مهمة: عند تعارض، لا نستخدم أبدًا `git reset --hard` الذي
+          # كان يمحو الـ commit المحلي بالكامل (وبالتالي offset/uploaded_messages
+          # الجديدين) في حال فشل merge لاحق أيضًا — وهذا بالضبط ما كان يسبب
+          # إعادة نشر نفس الفيديو مرتين. بدلًا من ذلك نستخدم `-X ours` على
+          # ملفات state فقط، بما أن السكربت نفسه (merge_latest_state) يضمن
+          # أن نسختنا المحلية أصلًا تحتوي على كل تسجيلات origin/main مدموجة
+          # حقليًا، فهي دائمًا أحدث أو مساوية لما في origin/main.
           for i in 1 2 3 4 5; do
             if git push; then
               echo "✅ تم رفع تحديث الحالة."
@@ -80,13 +87,10 @@ jobs:
             fi
             echo "⚠️ فشل push (محاولة $i)، جاري إعادة الأساس والمحاولة..."
             git fetch origin main
-            git rebase origin/main || {
-              git rebase --abort
-              git reset --hard HEAD~1
-              git merge origin/main -m "merge state"
-              git add state/long_offset.json state/long_uploaded_messages.json || true
-              git commit -m "chore: update long bot state [skip ci]"
-            }
+            if ! git rebase -X ours origin/main; then
+              git rebase --abort || true
+              git merge -X ours origin/main -m "merge state (keep local, already field-merged)"
+            fi
             sleep 3
           done
 

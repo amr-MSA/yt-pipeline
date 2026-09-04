@@ -2,16 +2,15 @@ name: Shorts Pipeline (Telegram → YouTube)
 
 on:
   schedule:
-    # نفس أوقات لونق تقريبًا، لكن بفارق دقيقتين لتقليل احتمال تصادم
-    # الـ push مع سير لونق (كلاهما يعدّل ملفات state/ في نفس اللحظة تقريبًا).
-    - cron: '2 4 * * *'
-    - cron: '2 9 * * *'
-    - cron: '2 10 * * *'
-    - cron: '2 11 * * *'
-    - cron: '2 14 * * *'
-    - cron: '2 17 * * *'
-    - cron: '2 19 * * *'
-    - cron: '2 21 * * *'
+    # يبدأ بعد مسار long بربع ساعة لتقليل تصادمات تحديث state/.
+    - cron: '15 4 * * *'
+    - cron: '15 9 * * *'
+    - cron: '15 10 * * *'
+    - cron: '15 11 * * *'
+    - cron: '15 14 * * *'
+    - cron: '15 17 * * *'
+    - cron: '15 19 * * *'
+    - cron: '15 21 * * *'
   workflow_dispatch: {}
 
 concurrency:
@@ -61,6 +60,13 @@ jobs:
 
           # قد تكون هناك تشغيلة أخرى (لونق) عملت push في نفس الوقت بالضبط
           # (نفس جدول الـ cron)، لذلك نعيد المحاولة بدل فشل صامت يُضيّع الـ offset الجديد.
+          #
+          # ملاحظة مهمة: لا نستخدم أبدًا `git reset --hard` الذي كان يمحو
+          # الـ commit المحلي بالكامل (offset/message_ledger الجديدين) عند فشل
+          # merge لاحق أيضًا — وهذا بالضبط ما كان يسبب إعادة نشر نفس الفيديو
+          # مرتين. بدلًا من ذلك نستخدم `-X ours` على ملفات state، بما أن
+          # السكربت نفسه (merge_latest_state) يضمن أن نسختنا المحلية أصلًا
+          # تحتوي على كل تسجيلات origin/main مدموجة حقليًا مسبقًا.
           for i in 1 2 3 4 5; do
             if git push; then
               echo "✅ تم رفع تحديث الحالة."
@@ -68,7 +74,10 @@ jobs:
             fi
             echo "⚠️ فشل push (محاولة $i)، جاري git pull --rebase وإعادة المحاولة..."
             git fetch origin main
-            git rebase origin/main || { git rebase --abort; git reset --hard HEAD~1; git merge origin/main -m "merge state"; git add state/; git commit -m "chore: update shorts bot offset / long-smart queues [skip ci]"; }
+            if ! git rebase -X ours origin/main; then
+              git rebase --abort || true
+              git merge -X ours origin/main -m "merge state (keep local, already field-merged)"
+            fi
             sleep 3
           done
 

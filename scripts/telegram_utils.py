@@ -5,6 +5,7 @@
 import json
 import os
 import re
+import subprocess
 import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
@@ -171,12 +172,26 @@ def load_uploaded_messages(state_dir: str, bot_name: str) -> dict:
 
 
 def save_uploaded_messages(state_dir: str, bot_name: str, state: dict) -> None:
-    """يحفظ سجل النجاح قبل محاولة الحذف لمنع إعادة الرفع بعد فشل الحذف."""
+    """يحفظ سجل النجاح قبل محاولة الحذف لمنع إعادة الرفع بعد فشل الحذف.
+
+    قبل الكتابة، يُعاد دمج الحالة مع أحدث نسخة موجودة فعليًا على القرص
+    (والتي قد تكون تحدّثت بعد load_uploaded_messages بسبب checkout جديد
+    في خطوة merge_latest_state). هذا يمنع فقدان مفاتيح نجاح سجّلها push
+    من تشغيلة أخرى وصل بعد أن قرأنا نسختنا المحلية.
+    """
     os.makedirs(state_dir, exist_ok=True)
     path = upload_state_path(state_dir, bot_name)
+    on_disk = load_uploaded_messages(state_dir, bot_name)
+    merged = dict(on_disk)
+    merged.update(state)
+    # أي مفتاح كان بالقرص لكن أُزيل عمدًا من `state` (بعد حذف رسالة تلجرام
+    # الناجح) يجب أن يبقى محذوفًا، لا أن يعود بسبب الدمج.
+    removed_keys = set(on_disk) - set(state)
+    for k in removed_keys:
+        merged.pop(k, None)
     temp_path = f"{path}.tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+        json.dump(merged, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, path)
 
 
@@ -202,10 +217,64 @@ def load_message_ledger(state_dir: str, bot_name: str) -> dict:
 
 
 def save_message_ledger(state_dir: str, bot_name: str, ledger: dict) -> None:
-    """يحفظ السجل باستبدال ذري حتى لا ينتج ملف JSON جزئي."""
+    """يحفظ السجل باستبدال ذري حتى لا ينتج ملف JSON جزئي.
+
+    يُدمج مع أحدث نسخة موجودة على القرص أولًا (نفس منطق save_uploaded_messages)
+    حتى لا تُفقد تسجيلات نجاح كتبتها تشغيلة أخرى ودُمجت عبر merge_latest_state
+    بعد أن قرأنا نسختنا المحلية في بداية هذا التشغيل.
+    """
     os.makedirs(state_dir, exist_ok=True)
     path = message_ledger_path(state_dir, bot_name)
+    on_disk = load_message_ledger(state_dir, bot_name)
+    merged = dict(on_disk)
+    merged.update(ledger)
     temp_path = f"{path}.tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(ledger, f, ensure_ascii=False, indent=2)
+        json.dump(merged, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, path)
+
+
+def merge_latest_state(state_dir: str, bot_name: str) -> None:
+    """يسحب أحدث state/ من origin/main ويدمجه مع الملفات المحلية قبل الحفظ الأخير.
+
+    يُستدعى في نهاية كل سير عمل (finally)، قبل أن يحفظ السكربت آخر نسخة من
+    offset/uploaded_messages/ledger. هذا يحمي من فقدان تسجيلات نجاح كتبتها
+    تشغيلة موازية دفعت (push) للريبو أثناء تنفيذ هذه التشغيلة الحالية —
+    وهو ما كان يسبب إعادة نشر نفس الفيديو مرتين عند فشل/تعارض git rebase
+    في خطوة الـ workflow.
+
+    الدمج يتم على مستوى الحقول (key-by-key) لا على مستوى النص، لذلك لا
+    يحتاج git ولا يمكن أن يفشل بتعارض نصي كما يحصل مع `git rebase` على JSON.
+    """
+    try:
+        subprocess.run(
+            ["git", "fetch", "origin", "main", "--quiet"],
+            check=True, timeout=30, capture_output=True,
+        )
+        remote_files = subprocess.run(
+            ["git", "show", f"origin/main:state/{bot_name}_uploaded_messages.json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if remote_files.returncode == 0 and remote_files.stdout.strip():
+            remote_uploaded = json.loads(remote_files.stdout)
+            if isinstance(remote_uploaded, dict):
+                local = load_uploaded_messages(state_dir, bot_name)
+                combined = dict(remote_uploaded)
+                combined.update(local)
+                save_uploaded_messages(state_dir, bot_name, combined)
+
+        remote_ledger = subprocess.run(
+            ["git", "show", f"origin/main:state/{bot_name}_message_ledger.json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if remote_ledger.returncode == 0 and remote_ledger.stdout.strip():
+            remote_data = json.loads(remote_ledger.stdout)
+            if isinstance(remote_data, dict):
+                local = load_message_ledger(state_dir, bot_name)
+                combined = dict(remote_data)
+                combined.update(local)
+                save_message_ledger(state_dir, bot_name, combined)
+    except Exception as e:
+        # لا نوقف السير بسبب فشل الدمج الاحتياطي؛ نكتفي بتسجيل تحذير.
+        # آلية retry/merge بخطوة الـ workflow تبقى خط الدفاع الثاني.
+        print(f"⚠️ تعذر دمج أحدث state من origin/main (سيُعتمد على retry بالـ workflow): {e}")

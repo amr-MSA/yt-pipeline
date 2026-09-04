@@ -17,6 +17,7 @@ from telegram_utils import (
     delete_message,
     fetch_new_links,
     load_uploaded_messages,
+    merge_latest_state,
     message_key,
     save_uploaded_messages,
     send_message,
@@ -174,6 +175,15 @@ def main():
                     os.remove(os.path.join(DOWNLOAD_DIR, f))
                 except OSError:
                     pass
+
+    # دمج احتياطي أخير مع أحدث state/ من origin/main، حتى لو كانت هناك
+    # تشغيلة موازية دفعت (push) تسجيلات نجاح جديدة أثناء تنفيذ هذا التشغيل.
+    # هذا يمنع أن يعيد push الـ workflow اللاحق (rebase) الكتابة فوق
+    # تسجيل نجاح حقيقي، وهو ما كان يؤدي لإعادة رفع نفس الفيديو.
+    try:
+        merge_latest_state(STATE_DIR, BOT_NAME)
+    except Exception as e:
+        print(f"⚠️ تحذير: فشل الدمج الاحتياطي النهائي للحالة: {e}")
 
     print("\n🎉 انتهت معالجة سير لونق.")
 
