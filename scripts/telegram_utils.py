@@ -10,18 +10,26 @@ import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
-# نمط للتعرف على روابط يوتيوب (فيديو عادي أو shorts)
-YOUTUBE_URL_RE = re.compile(
-    r"(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)[\w-]+|youtu\.be/[\w-]+)[^\s]*)",
+# yt-dlp يدعم آلاف المواقع والمنصات؛ لا نحصر الروابط في YouTube هنا.
+GENERIC_URL_RE = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
+TRAILING_URL_PUNCTUATION = ".,!?;:'\"،؛؟)]}>"
+
+# نمط للتعرف على أمر /long متبوعًا برابط من أي منصة يدعمها yt-dlp.
+LONG_COMMAND_RE = re.compile(
+    r"/long(?:@\w+)?\s+"
+    r"(https?://[^\s<>]+)",
     re.IGNORECASE,
 )
 
-# نمط للتعرف على أمر /long متبوعًا برابط يوتيوب (خط الإنتاج الذكي المنفصل)
-LONG_COMMAND_RE = re.compile(
-    r"/long(?:@\w+)?\s+"
-    r"(https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|shorts/)[\w-]+|youtu\.be/[\w-]+)[^\s]*)",
-    re.IGNORECASE,
-)
+
+def _clean_url(url: str) -> str:
+    """يزيل علامات الترقيم التي تلحق بالرابط داخل نص الرسالة."""
+    return url.rstrip(TRAILING_URL_PUNCTUATION)
+
+
+def extract_urls(text: str) -> list[str]:
+    """يستخرج روابط HTTP(S) من أي منصة، مع إزالة punctuation المحيط."""
+    return [_clean_url(match.group(0)) for match in GENERIC_URL_RE.finditer(text)]
 
 
 def _offset_file(state_dir: str, bot_name: str) -> str:
@@ -54,7 +62,7 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
         text = msg.get("text") or msg.get("caption") or ""
         if LONG_COMMAND_RE.search(text):
             continue
-        for u in YOUTUBE_URL_RE.findall(text):
+        for u in extract_urls(text):
             links.append(
                 {
                     "url": u,
@@ -79,14 +87,14 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
         if m:
             long_commands.append(
                 {
-                    "url": m.group(1),
+                    "url": _clean_url(m.group(1)),
                     "chat_id": msg["chat"]["id"],
                     "message_id": msg["message_id"],
                     "text": text.strip(),
                 }
             )
             continue
-        for u in YOUTUBE_URL_RE.findall(text):
+        for u in extract_urls(text):
             links.append(
                 {
                     "url": u,
