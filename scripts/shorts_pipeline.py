@@ -14,6 +14,7 @@ import traceback
 
 import yt_dlp
 from googleapiclient.http import MediaFileUpload
+from cookie_utils import temporary_cookie_file
 
 from telegram_utils import (
     fetch_all_new_messages,
@@ -53,16 +54,11 @@ def download_clip(url: str, out_path: str) -> dict:
         "quiet": True,
         "noprogress": True,
     }
-    cookies_env = os.environ.get("YT_COOKIES")
-    if cookies_env:
-        cookie_path = os.path.join(STATE_DIR, "cookies.txt")
-        with open(cookie_path, "w", encoding="utf-8") as f:
-            f.write(cookies_env)
-        ydl_opts["cookiefile"] = cookie_path
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-    return info
+    with temporary_cookie_file(os.environ.get("YT_COOKIES")) as cookie_path:
+        if cookie_path:
+            ydl_opts["cookiefile"] = cookie_path
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(url, download=True)
 
 
 def apply_template(raw_path: str, final_path: str) -> bool:

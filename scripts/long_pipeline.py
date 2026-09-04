@@ -12,6 +12,7 @@ import traceback
 
 import yt_dlp
 from googleapiclient.http import MediaFileUpload
+from cookie_utils import temporary_cookie_file
 
 from telegram_utils import (
     delete_message,
@@ -40,15 +41,11 @@ def download_video(url: str, out_path: str) -> dict:
         # Deno هو runtime الموصى به لـ EJS، وتثبيت yt-dlp[default] يوفر yt-dlp-ejs.
         "js_runtimes": {"deno": {}},
     }
-    cookies_env = os.environ.get("YT_COOKIES")
-    if cookies_env:
-        cookie_path = os.path.join(STATE_DIR, "cookies.txt")
-        with open(cookie_path, "w", encoding="utf-8") as f:
-            f.write(cookies_env)
-        ydl_opts["cookiefile"] = cookie_path
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        return ydl.extract_info(url, download=True)
+    with temporary_cookie_file(os.environ.get("YT_COOKIES")) as cookie_path:
+        if cookie_path:
+            ydl_opts["cookiefile"] = cookie_path
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(url, download=True)
 
 
 def upload_video(youtube, file_path: str, title: str, description: str) -> str:

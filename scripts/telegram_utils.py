@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+from urllib.parse import urlsplit
 import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
@@ -27,9 +28,19 @@ def _clean_url(url: str) -> str:
     return url.rstrip(TRAILING_URL_PUNCTUATION)
 
 
+def _is_safe_url(url: str) -> bool:
+    """يرفض userinfo حتى لا تُحفظ أو تُرسل بيانات دخول ضمن رابط المصدر."""
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme.lower() in {"http", "https"} and not parsed.username and not parsed.password
+    except ValueError:
+        return False
+
+
 def extract_urls(text: str) -> list[str]:
     """يستخرج روابط HTTP(S) من أي منصة، مع إزالة punctuation المحيط."""
-    return [_clean_url(match.group(0)) for match in GENERIC_URL_RE.finditer(text)]
+    urls = (_clean_url(match.group(0)) for match in GENERIC_URL_RE.finditer(text))
+    return [url for url in urls if _is_safe_url(url)]
 
 
 def _offset_file(state_dir: str, bot_name: str) -> str:
@@ -85,9 +96,12 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
         text = msg.get("text") or msg.get("caption") or ""
         m = LONG_COMMAND_RE.search(text)
         if m:
+            url = _clean_url(m.group(1))
+            if not _is_safe_url(url):
+                continue
             long_commands.append(
                 {
-                    "url": _clean_url(m.group(1)),
+                    "url": url,
                     "chat_id": msg["chat"]["id"],
                     "message_id": msg["message_id"],
                     "text": text.strip(),

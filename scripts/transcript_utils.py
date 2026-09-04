@@ -9,6 +9,7 @@ import re
 import xml.etree.ElementTree as ET
 
 import yt_dlp
+from cookie_utils import temporary_cookie_file
 
 
 def _clean_text(raw: str) -> str:
@@ -61,14 +62,11 @@ def fetch_transcript(url: str, work_dir: str, cookies_env: str | None = None) ->
         "quiet": True,
         "noprogress": True,
     }
-    if cookies_env:
-        cookie_path = os.path.join(work_dir, "cookies.txt")
-        with open(cookie_path, "w", encoding="utf-8") as f:
-            f.write(cookies_env)
-        ydl_opts["cookiefile"] = cookie_path
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+    with temporary_cookie_file(cookies_env) as cookie_path:
+        if cookie_path:
+            ydl_opts["cookiefile"] = cookie_path
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
 
     video_id = info.get("id", "")
     title = info.get("title", "")

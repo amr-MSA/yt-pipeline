@@ -7,6 +7,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 
 import telegram_utils
+from cookie_utils import temporary_cookie_file
 
 
 def test_extract_urls_accepts_multiple_platforms_and_cleans_punctuation():
@@ -50,6 +51,18 @@ def test_fetch_all_new_messages_accepts_non_youtube_long_command():
         links, long_commands = telegram_utils.fetch_all_new_messages("token", "/tmp", "shorts")
     assert links == []
     assert long_commands[0]["url"] == "https://vimeo.com/123456"
+
+
+def test_urls_with_embedded_credentials_are_rejected():
+    assert telegram_utils.extract_urls("https://user:password@example.com/video/1") == []
+
+
+def test_cookie_file_is_private_and_deleted_after_context():
+    with temporary_cookie_file("# Netscape\nsecret-cookie") as path:
+        assert path is not None
+        assert Path(path).exists()
+        assert (Path(path).stat().st_mode & 0o777) == 0o600
+    assert not Path(path).exists()
 
 
 def test_duplicate_links_have_independent_message_keys():

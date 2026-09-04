@@ -29,6 +29,7 @@ import traceback
 
 from googleapiclient.http import MediaFileUpload
 
+from cookie_utils import temporary_cookie_file
 import fixed_meta
 import publish_quota
 import queue_utils
@@ -140,14 +141,11 @@ def _download_clip_range(url: str, start: float, end: float, out_path: str, cook
         "quiet": True,
         "noprogress": True,
     }
-    if cookies_env:
-        cookie_path = os.path.join(STATE_DIR, "cookies.txt")
-        with open(cookie_path, "w", encoding="utf-8") as f:
-            f.write(cookies_env)
-        ydl_opts["cookiefile"] = cookie_path
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.extract_info(url, download=True)
+    with temporary_cookie_file(cookies_env) as cookie_path:
+        if cookie_path:
+            ydl_opts["cookiefile"] = cookie_path
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(url, download=True)
 
 
 def _apply_shorts_template(raw_path: str, final_path: str) -> bool:
