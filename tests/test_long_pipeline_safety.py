@@ -102,6 +102,21 @@ def test_batch_summary_groups_items_by_chat():
     send.assert_any_call("token", 8, "📊 تم قبول 1 رابط للمعالجة في هذه الدفعة.")
 
 
+def test_title_commands_update_the_previous_link():
+    updates = [
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/a"}},
+        {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "/take"}},
+        {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/b"}},
+        {"update_id": 4, "message": {"message_id": 4, "chat": {"id": 7}, "text": "/t \"عنوان مخصص\""}},
+        {"update_id": 5, "message": {"message_id": 5, "chat": {"id": 7}, "text": "/d"}},
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    assert links[0]["title_mode"] == "source"
+    assert links[1]["title_mode"] == "default"
+    assert links[1].get("title_override") is None
+
+
 def test_duplicate_links_have_independent_message_keys():
     first = {"chat_id": 7, "message_id": 101, "url": "https://youtu.be/same"}
     second = {"chat_id": 7, "message_id": 102, "url": "https://youtu.be/same"}

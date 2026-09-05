@@ -21,6 +21,11 @@ LONG_COMMAND_RE = re.compile(
     r"(https?://[^\s<>]+)",
     re.IGNORECASE,
 )
+TAKE_TITLE_COMMAND_RE = re.compile(r"^/take(?:@\w+)?$", re.IGNORECASE)
+DEFAULT_TITLE_COMMAND_RE = re.compile(r"^/d(?:@\w+)?$", re.IGNORECASE)
+CUSTOM_TITLE_COMMAND_RE = re.compile(
+    r"^/t(?:@\w+)?\s+[\"“](.+?)[\"”]$", re.IGNORECASE | re.DOTALL
+)
 
 
 def _clean_url(url: str) -> str:
@@ -53,6 +58,27 @@ def is_boundary_marker(text: str) -> bool:
     )
 
 
+def _apply_title_command(text: str, item: dict | None) -> bool:
+    """يطبق أمر عنوان على آخر رابط، ويرجع True عند التعرف على الأمر."""
+    command = text.strip()
+    if item is None:
+        return False
+    if TAKE_TITLE_COMMAND_RE.fullmatch(command):
+        item["title_mode"] = "source"
+        item.pop("title_override", None)
+        return True
+    if DEFAULT_TITLE_COMMAND_RE.fullmatch(command):
+        item["title_mode"] = "default"
+        item.pop("title_override", None)
+        return True
+    match = CUSTOM_TITLE_COMMAND_RE.fullmatch(command)
+    if match:
+        item["title_mode"] = "custom"
+        item["title_override"] = match.group(1).strip()
+        return True
+    return False
+
+
 def _offset_file(state_dir: str, bot_name: str) -> str:
     return os.path.join(state_dir, f"{bot_name}_offset.json")
 
@@ -78,23 +104,29 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
     """يجلب الروابط الجديدة، مع إبقاء كل رسالة كعنصر مستقل حتى عند تكرار الرابط."""
     updates = _fetch_updates(bot_token, state_dir, bot_name)
     links = []
+    last_link_by_chat: dict[int, dict] = {}
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
         if is_boundary_marker(text):
             links = []
+            last_link_by_chat = {}
+            continue
+        chat_id = msg["chat"]["id"]
+        if _apply_title_command(text, last_link_by_chat.get(chat_id)):
             continue
         if LONG_COMMAND_RE.search(text):
             continue
         for u in extract_urls(text):
-            links.append(
-                {
+            item = {
                     "url": u,
-                    "chat_id": msg["chat"]["id"],
+                    "chat_id": chat_id,
                     "message_id": msg["message_id"],
                     "text": text.strip(),
+                    "title_mode": "default",
                 }
-            )
+            links.append(item)
+            last_link_by_chat[chat_id] = item
 
     return links
 

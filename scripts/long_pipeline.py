@@ -31,6 +31,21 @@ from youtube_auth import get_youtube_client
 STATE_DIR = "state"
 DOWNLOAD_DIR = "downloads_long"
 BOT_NAME = "long"
+DEFAULT_TITLE = "ارح قلبك بهذه التلاوة العطرة"
+DEFAULT_DESCRIPTION = """أستغفر الله العظيم واتوب إليه 🤲
+
+
+قناة تجمع لكم مقاطع منوعة ومختارات أحببت مشاركتها معكم. أتمنى تنال إعجابكم وتستمتعوا بالمشاهدة ✨🎥
+شكراً لكل المتابعين على الدعم والتشجيع المستمر، وجودكم يسعدني وتفاعلكم هو الدافع للأفضل دائماً 🙏 طابت أوقاتكم بكل خير 🌸🍃
+
+
+
+ تواصل معي (Contact)
+📩 Email: 951999aliali@gmail.com
+⚖️ تنويه وحقوق (إخلاء مسؤولية)
+نحنُ ننشر هذه المواد تقديراً للمحتوى وحرصاً على وصوله لأكبر عدد من المتذوقين، مع كامل اعترافنا بأن الحقوق محفوظة لأصحابها الأصليين.
+تنبيه هام: نظراً لأننا ننشر بحسن نية كاملة، فإذا وجد صاحب الحق أي إشكال في عرض محتواه، نرجو التكرم بالتواصل عبر الإيميل أعلاه، وسنقوم بـ حذف المقطع فوراً وبشكل نهائي تقديراً لجهودكم
+"""
 
 
 def download_video(url: str, out_path: str) -> dict:
@@ -139,8 +154,15 @@ def main():
 
             print("⬇️ تحميل الفيديو...")
             info = download_video(url, raw_path)
-            title = info.get("title", "فيديو جديد")
-            desc = info.get("description", "") or ""
+            source_title = info.get("title", "فيديو جديد")
+            desc = info.get("description", "") or DEFAULT_DESCRIPTION
+            title_mode = item.get("title_mode", "default")
+            if title_mode == "source":
+                title = source_title
+            elif title_mode == "custom" and item.get("title_override"):
+                title = item["title_override"]
+            else:
+                title = DEFAULT_TITLE
 
             actual_file = raw_path
             if not os.path.exists(actual_file):
