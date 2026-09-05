@@ -23,6 +23,7 @@ from telegram_utils import (
     message_key,
     save_uploaded_messages,
     record_source_success,
+    send_batch_summary,
     send_message,
 )
 from youtube_auth import get_youtube_client
@@ -99,6 +100,7 @@ def main():
 
     print("🔎 جاري فحص رسائل بوت لونق الجديدة...")
     links = fetch_new_links(bot_token, STATE_DIR, BOT_NAME)
+    send_batch_summary(bot_token, links, "رابط")
 
     if not links:
         print("📭 لا توجد روابط جديدة. إنهاء.")

@@ -89,6 +89,19 @@ def test_numeric_marker_is_boundary_and_marker_with_text_is_not():
     assert not telegram_utils.is_boundary_marker("batch 42")
 
 
+def test_batch_summary_groups_items_by_chat():
+    items = [
+        {"chat_id": 7},
+        {"chat_id": 7},
+        {"chat_id": 8},
+    ]
+    with patch.object(telegram_utils, "send_message") as send:
+        telegram_utils.send_batch_summary("token", items, "رابط")
+    assert send.call_count == 2
+    send.assert_any_call("token", 7, "📊 تم قبول 2 روابط للمعالجة في هذه الدفعة.")
+    send.assert_any_call("token", 8, "📊 تم قبول 1 رابط للمعالجة في هذه الدفعة.")
+
+
 def test_duplicate_links_have_independent_message_keys():
     first = {"chat_id": 7, "message_id": 101, "url": "https://youtu.be/same"}
     second = {"chat_id": 7, "message_id": 102, "url": "https://youtu.be/same"}

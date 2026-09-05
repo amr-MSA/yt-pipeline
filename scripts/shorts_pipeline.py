@@ -24,6 +24,7 @@ from telegram_utils import (
     message_key,
     save_message_ledger,
     record_source_success,
+    send_batch_summary,
     send_message,
 )
 from youtube_auth import get_youtube_client
@@ -124,6 +125,8 @@ def main():
 
     print("🔎 جاري فحص رسائل بوت شورتس الجديدة...")
     links, long_commands = fetch_all_new_messages(bot_token, STATE_DIR, BOT_NAME)
+    send_batch_summary(bot_token, links, "رابط")
+    send_batch_summary(bot_token, long_commands, "أمر /long")
 
     ledger = load_message_ledger(STATE_DIR, BOT_NAME)
     source_history = load_source_history(STATE_DIR, BOT_NAME)

@@ -178,6 +178,20 @@ def send_message(bot_token: str, chat_id: int, text: str) -> None:
         pass
 
 
+def send_batch_summary(bot_token: str, items: list[dict], label: str = "الرابط") -> None:
+    """يرسل ملخصًا واحدًا لكل قناة/محادثة عن العناصر المقبولة في الدفعة."""
+    counts: dict[int, int] = {}
+    for item in items:
+        counts[item["chat_id"]] = counts.get(item["chat_id"], 0) + 1
+    for chat_id, count in counts.items():
+        unit = label if count == 1 else ("روابط" if label == "رابط" else label)
+        send_message(
+            bot_token,
+            chat_id,
+            f"📊 تم قبول {count} {unit} للمعالجة في هذه الدفعة.",
+        )
+
+
 def delete_message(bot_token: str, chat_id: int, message_id: int) -> bool:
     """يحذف رسالة Telegram ويعيد True فقط إذا أكد API نجاح الحذف."""
     url = TELEGRAM_API.format(token=bot_token, method="deleteMessage")
