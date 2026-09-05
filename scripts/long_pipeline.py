@@ -23,7 +23,6 @@ from telegram_utils import (
     message_key,
     save_uploaded_messages,
     record_source_success,
-    send_batch_summary,
     send_message,
 )
 from youtube_auth import get_youtube_client
@@ -115,13 +114,16 @@ def main():
 
     print("🔎 جاري فحص رسائل بوت لونق الجديدة...")
     links = fetch_new_links(bot_token, STATE_DIR, BOT_NAME)
-    send_batch_summary(bot_token, links, "رابط")
-
     if not links:
         print("📭 لا توجد روابط جديدة. إنهاء.")
         return
 
     print(f"📦 تم العثور على {len(links)} رابط جديد.")
+    batch_results: dict[int, list[str]] = {}
+
+    def add_result(chat_id: int, message: str) -> None:
+        batch_results.setdefault(chat_id, []).append(message)
+
     youtube = get_youtube_client(youtube_token_json)
 
     for idx, item in enumerate(links, 1):
@@ -136,6 +138,7 @@ def main():
             # قد تكون الرسالة عادت من دفعة قديمة؛ لا نعيد الرفع إذا كان النجاح مسجلاً.
             if key in uploaded:
                 print(f"ℹ️ الرفع مسجل مسبقًا لهذه الرسالة؛ لن يعاد رفعها: {key}")
+                add_result(chat_id, "⏭️ تم تجاوز رابط سبق تسجيل رفعه لهذه الرسالة.")
                 if delete_message(bot_token, chat_id, message_id):
                     uploaded.pop(key, None)
                     save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
@@ -144,12 +147,11 @@ def main():
             if url in source_history:
                 previous_video = source_history[url].get("video_id")
                 print(f"ℹ️ المصدر منشور مسبقًا؛ تم تجاوز إعادة الرفع: {url}")
-                if previous_video:
-                    send_message(
-                        bot_token,
-                        chat_id,
-                        f"ℹ️ تم نشر هذا الرابط مسبقًا ولن يُرفع مرة أخرى:\nhttps://youtu.be/{previous_video}",
-                    )
+                previous_text = (
+                    f"https://youtu.be/{previous_video}"
+                    if previous_video else "الرابط مسجل في سجل النشر"
+                )
+                add_result(chat_id, f"⏭️ تم تجاوز رابط منشور سابقًا: {previous_text}")
                 continue
 
             print("⬇️ تحميل الفيديو...")
@@ -198,13 +200,13 @@ def main():
             else:
                 print(f"⚠️ نجح الرفع لكن تعذر حذف الرسالة؛ لن يعاد الرفع: {message_id}")
 
-            send_message(bot_token, chat_id, f"✅ تم نشر الفيديو بنجاح:\n{video_url}")
+            add_result(chat_id, f"✅ تم نشر الفيديو بنجاح:\n{video_url}")
 
         except Exception as e:
             err = f"{e}"
             print(f"❌ فشل: {err}")
             traceback.print_exc()
-            send_message(bot_token, chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
+            add_result(chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
 
         finally:
             for f in os.listdir(DOWNLOAD_DIR):
@@ -212,6 +214,14 @@ def main():
                     os.remove(os.path.join(DOWNLOAD_DIR, f))
                 except OSError:
                     pass
+
+    for chat_id, results in batch_results.items():
+        send_message(
+            bot_token,
+            chat_id,
+            f"📊 تقرير الدفعة — تم قبول {len(results)} رابط:\n\n"
+            + "\n\n".join(results),
+        )
 
     # دمج احتياطي أخير مع أحدث state/ من origin/main، حتى لو كانت هناك
     # تشغيلة موازية دفعت (push) تسجيلات نجاح جديدة أثناء تنفيذ هذا التشغيل.

@@ -26,6 +26,11 @@ DEFAULT_TITLE_COMMAND_RE = re.compile(r"^/d(?:@\w+)?$", re.IGNORECASE)
 CUSTOM_TITLE_COMMAND_RE = re.compile(
     r"^/t(?:@\w+)?\s+[\"“](.+?)[\"”]$", re.IGNORECASE | re.DOTALL
 )
+PIPELINE_REPORT_PREFIXES = (
+    "📊 تقرير الدفعة",
+    "✅ تم نشر الفيديو بنجاح:",
+    "📊 تم قبول ",
+)
 
 
 def _clean_url(url: str) -> str:
@@ -56,6 +61,11 @@ def is_boundary_marker(text: str) -> bool:
     return all(not char.isalpha() for char in stripped) and any(
         char.isdigit() or not char.isspace() for char in stripped
     )
+
+
+def is_pipeline_report(text: str) -> bool:
+    """يتعرف على تقارير البوت حتى لا تُعاد روابط YouTube الموجودة داخلها."""
+    return text.strip().startswith(PIPELINE_REPORT_PREFIXES)
 
 
 def _apply_title_command(text: str, item: dict | None) -> bool:
@@ -108,6 +118,10 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
+        if is_pipeline_report(text):
+            links = []
+            last_link_by_chat = {}
+            continue
         if is_boundary_marker(text):
             links = []
             last_link_by_chat = {}
@@ -139,6 +153,10 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
+        if is_pipeline_report(text):
+            links = []
+            long_commands = []
+            continue
         if is_boundary_marker(text):
             links = []
             long_commands = []

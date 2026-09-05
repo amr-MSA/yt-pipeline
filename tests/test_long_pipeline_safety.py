@@ -117,6 +117,28 @@ def test_title_commands_update_the_previous_link():
     assert links[1].get("title_override") is None
 
 
+def test_pipeline_report_is_a_boundary_for_old_links():
+    updates = [
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/old"}},
+        {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "📊 تقرير الدفعة — تم قبول 1 رابط:\nhttps://youtu.be/old"}},
+        {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/new"}},
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    assert [item["url"] for item in links] == ["https://example.com/new"]
+
+
+def test_legacy_success_message_is_a_boundary_too():
+    updates = [
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/old"}},
+        {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "✅ تم نشر الفيديو بنجاح:\nhttps://youtu.be/old"}},
+        {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/new"}},
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    assert [item["url"] for item in links] == ["https://example.com/new"]
+
+
 def test_duplicate_links_have_independent_message_keys():
     first = {"chat_id": 7, "message_id": 101, "url": "https://youtu.be/same"}
     second = {"chat_id": 7, "message_id": 102, "url": "https://youtu.be/same"}
