@@ -221,6 +221,42 @@ def message_key(item: dict) -> str:
     return f"{item['chat_id']}:{item['message_id']}"
 
 
+def source_history_path(state_dir: str, bot_name: str) -> str:
+    return os.path.join(state_dir, f"{bot_name}_source_history.json")
+
+
+def load_source_history(state_dir: str, bot_name: str) -> dict:
+    """يقرأ سجل الروابط المنشورة حتى لا يؤدي تكرار رسالة الرابط إلى إعادة الرفع."""
+    path = source_history_path(state_dir, bot_name)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_source_history(state_dir: str, bot_name: str, history: dict) -> None:
+    """يحفظ سجل المصادر باستبدال ذري ودمج آمن مع أحدث نسخة محلية."""
+    os.makedirs(state_dir, exist_ok=True)
+    path = source_history_path(state_dir, bot_name)
+    on_disk = load_source_history(state_dir, bot_name)
+    merged = dict(on_disk)
+    merged.update(history)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
+
+
+def record_source_success(state_dir: str, bot_name: str, source_url: str, video_id: str) -> None:
+    history = load_source_history(state_dir, bot_name)
+    history[source_url] = {"video_id": video_id}
+    save_source_history(state_dir, bot_name, history)
+
+
 def message_ledger_path(state_dir: str, bot_name: str) -> str:
     return os.path.join(state_dir, f"{bot_name}_message_ledger.json")
 
@@ -296,6 +332,18 @@ def merge_latest_state(state_dir: str, bot_name: str) -> None:
                 combined = dict(remote_data)
                 combined.update(local)
                 save_message_ledger(state_dir, bot_name, combined)
+
+        remote_sources = subprocess.run(
+            ["git", "show", f"origin/main:state/{bot_name}_source_history.json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if remote_sources.returncode == 0 and remote_sources.stdout.strip():
+            remote_data = json.loads(remote_sources.stdout)
+            if isinstance(remote_data, dict):
+                local = load_source_history(state_dir, bot_name)
+                combined = dict(remote_data)
+                combined.update(local)
+                save_source_history(state_dir, bot_name, combined)
     except Exception as e:
         # لا نوقف السير بسبب فشل الدمج الاحتياطي؛ نكتفي بتسجيل تحذير.
         # آلية retry/merge بخطوة الـ workflow تبقى خط الدفاع الثاني.

@@ -19,9 +19,11 @@ from cookie_utils import temporary_cookie_file
 from telegram_utils import (
     fetch_all_new_messages,
     load_message_ledger,
+    load_source_history,
     merge_latest_state,
     message_key,
     save_message_ledger,
+    record_source_success,
     send_message,
 )
 from youtube_auth import get_youtube_client
@@ -124,6 +126,7 @@ def main():
     links, long_commands = fetch_all_new_messages(bot_token, STATE_DIR, BOT_NAME)
 
     ledger = load_message_ledger(STATE_DIR, BOT_NAME)
+    source_history = load_source_history(STATE_DIR, BOT_NAME)
     unique_long_commands = []
     seen_command_keys = set()
     for item in long_commands:
@@ -176,6 +179,19 @@ def main():
             continue
         if record.get("status") == "processing":
             print(f"⚠️ حالة الرفع غير محسومة لرسالة سابقة؛ تم تجاوزها بأمان: {key}")
+            continue
+        if item["url"] in source_history:
+            previous_video = source_history[item["url"]].get("video_id")
+            ledger[key] = {
+                "status": "succeeded",
+                "stage": "duplicate_source",
+                "chat_id": item["chat_id"],
+                "message_id": item["message_id"],
+                "source_url": item["url"],
+                "video_id": previous_video,
+                "video_url": f"https://youtu.be/{previous_video}" if previous_video else None,
+            }
+            print(f"ℹ️ المصدر منشور مسبقًا؛ تم تجاوز إعادة الرفع: {item['url']}")
             continue
         unique_links.append(item)
     # الـ offset يمنع Telegram من إعادة الرسالة؛ نعيد فقط ما فشل قبل الرفع.
@@ -269,6 +285,8 @@ def main():
                 "video_url": video_url,
             }
             save_message_ledger(STATE_DIR, BOT_NAME, ledger)
+            record_source_success(STATE_DIR, BOT_NAME, url, video_id)
+            source_history[url] = {"video_id": video_id}
 
             send_message(
                 bot_token, chat_id, f"✅ تم نشر الشورت بنجاح:\n{video_url}"

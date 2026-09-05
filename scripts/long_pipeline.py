@@ -18,9 +18,11 @@ from telegram_utils import (
     delete_message,
     fetch_new_links,
     load_uploaded_messages,
+    load_source_history,
     merge_latest_state,
     message_key,
     save_uploaded_messages,
+    record_source_success,
     send_message,
 )
 from youtube_auth import get_youtube_client
@@ -89,6 +91,7 @@ def main():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
     uploaded = load_uploaded_messages(STATE_DIR, BOT_NAME)
+    source_history = load_source_history(STATE_DIR, BOT_NAME)
     reconciled = reconcile_uploaded_messages(bot_token, uploaded)
     if reconciled != uploaded:
         save_uploaded_messages(STATE_DIR, BOT_NAME, reconciled)
@@ -121,6 +124,17 @@ def main():
                     save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
                 continue
 
+            if url in source_history:
+                previous_video = source_history[url].get("video_id")
+                print(f"ℹ️ المصدر منشور مسبقًا؛ تم تجاوز إعادة الرفع: {url}")
+                if previous_video:
+                    send_message(
+                        bot_token,
+                        chat_id,
+                        f"ℹ️ تم نشر هذا الرابط مسبقًا ولن يُرفع مرة أخرى:\nhttps://youtu.be/{previous_video}",
+                    )
+                continue
+
             print("⬇️ تحميل الفيديو...")
             info = download_video(url, raw_path)
             title = info.get("title", "فيديو جديد")
@@ -150,6 +164,8 @@ def main():
                 "url": url,
             }
             save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+            record_source_success(STATE_DIR, BOT_NAME, url, video_id)
+            source_history[url] = {"video_id": video_id}
 
             if delete_message(bot_token, chat_id, message_id):
                 uploaded.pop(key, None)

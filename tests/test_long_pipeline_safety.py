@@ -65,6 +65,13 @@ def test_cookie_file_is_private_and_deleted_after_context():
     assert not Path(path).exists()
 
 
+def test_source_history_persists_published_url():
+    with tempfile.TemporaryDirectory() as tmp:
+        telegram_utils.record_source_success(tmp, "long", "https://example.com/video/1", "yt123")
+        history = telegram_utils.load_source_history(tmp, "long")
+        assert history["https://example.com/video/1"]["video_id"] == "yt123"
+
+
 def test_duplicate_links_have_independent_message_keys():
     first = {"chat_id": 7, "message_id": 101, "url": "https://youtu.be/same"}
     second = {"chat_id": 7, "message_id": 102, "url": "https://youtu.be/same"}
