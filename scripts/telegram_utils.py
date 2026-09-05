@@ -43,6 +43,16 @@ def extract_urls(text: str) -> list[str]:
     return [url for url in urls if _is_safe_url(url)]
 
 
+def is_boundary_marker(text: str) -> bool:
+    """يتعرف على رسالة تحكم مكونة من أرقام/رموز فقط، مثل ``1`` أو ``.``."""
+    stripped = text.strip()
+    if not stripped or extract_urls(stripped):
+        return False
+    return all(not char.isalpha() for char in stripped) and any(
+        char.isdigit() or not char.isspace() for char in stripped
+    )
+
+
 def _offset_file(state_dir: str, bot_name: str) -> str:
     return os.path.join(state_dir, f"{bot_name}_offset.json")
 
@@ -71,6 +81,9 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
+        if is_boundary_marker(text):
+            links = []
+            continue
         if LONG_COMMAND_RE.search(text):
             continue
         for u in extract_urls(text):
@@ -94,6 +107,10 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
+        if is_boundary_marker(text):
+            links = []
+            long_commands = []
+            continue
         m = LONG_COMMAND_RE.search(text)
         if m:
             url = _clean_url(m.group(1))

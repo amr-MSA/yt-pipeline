@@ -72,6 +72,23 @@ def test_source_history_persists_published_url():
         assert history["https://example.com/video/1"]["video_id"] == "yt123"
 
 
+def test_boundary_marker_discards_links_before_it():
+    updates = [
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/old"}},
+        {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "."}},
+        {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/new"}},
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links, _ = telegram_utils.fetch_all_new_messages("token", "/tmp", "shorts")
+    assert [item["url"] for item in links] == ["https://example.com/new"]
+
+
+def test_numeric_marker_is_boundary_and_marker_with_text_is_not():
+    assert telegram_utils.is_boundary_marker("42")
+    assert telegram_utils.is_boundary_marker("★")
+    assert not telegram_utils.is_boundary_marker("batch 42")
+
+
 def test_duplicate_links_have_independent_message_keys():
     first = {"chat_id": 7, "message_id": 101, "url": "https://youtu.be/same"}
     second = {"chat_id": 7, "message_id": 102, "url": "https://youtu.be/same"}
