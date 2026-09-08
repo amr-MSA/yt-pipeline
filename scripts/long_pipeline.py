@@ -3,8 +3,8 @@
 1. يفحص بوت تلجرام لأي روابط يوتيوب جديدة أُرسلت إليه.
 2. لكل رسالة رابط: يحمّل الفيديو كاملًا.
 3. ينشره على قناة يوتيوب الخاصة بك كفيديو عام (public).
-4. بعد تأكيد videoId فقط، يحذف رسالة الرابط من Telegram.
-5. يحتفظ بنجاح الرفع إذا تعذر الحذف حتى لا يعاد رفع الفيديو.
+4. يسجل نجاح كل رسالة حسب chat_id:message_id ثم يحذف رسالة Telegram.
+5. يحتفظ بنجاح الرفع إذا تعذر الحذف حتى لا يعاد رفع الطلب.
 """
 import os
 import sys
@@ -21,7 +21,6 @@ from telegram_utils import (
     merge_latest_state,
     message_key,
     save_uploaded_messages,
-    send_batch_summary,
     send_message,
 )
 from youtube_auth import get_youtube_client
@@ -89,9 +88,11 @@ def reconcile_uploaded_messages(bot_token: str, uploaded: dict) -> dict:
     """يحاول حذف الرسائل التي نجح رفعها في تشغيل سابق ولم يُحذف أصلها بعد."""
     pending = dict(uploaded)
     for key, item in list(pending.items()):
+        if item.get("deleted"):
+            continue
         if delete_message(bot_token, item["chat_id"], item["message_id"]):
+            item["deleted"] = True
             print(f"🗑️ تم حذف رسالة Telegram المؤكدة سابقًا: {key}")
-            pending.pop(key, None)
         else:
             print(f"⚠️ تعذر حذف رسالة Telegram بعد رفع مؤكد، ستتم إعادة المحاولة: {key}")
     return pending
@@ -112,13 +113,16 @@ def main():
 
     print("🔎 جاري فحص رسائل بوت لونق الجديدة...")
     links = fetch_new_links(bot_token, STATE_DIR, BOT_NAME)
-    send_batch_summary(bot_token, links, "رابط")
-
     if not links:
         print("📭 لا توجد روابط جديدة. إنهاء.")
         return
 
     print(f"📦 تم العثور على {len(links)} رابط جديد.")
+    batch_results: dict[int, list[str]] = {}
+
+    def add_result(chat_id: int, message: str) -> None:
+        batch_results.setdefault(chat_id, []).append(message)
+
     youtube = get_youtube_client(youtube_token_json)
 
     for idx, item in enumerate(links, 1):
@@ -133,8 +137,9 @@ def main():
             # قد تكون الرسالة عادت من دفعة قديمة؛ لا نعيد الرفع إذا كان النجاح مسجلاً.
             if key in uploaded:
                 print(f"ℹ️ الرفع مسجل مسبقًا لهذه الرسالة؛ لن يعاد رفعها: {key}")
+                add_result(chat_id, "⏭️ تم تجاوز رابط سبق تسجيل رفعه لهذه الرسالة.")
                 if delete_message(bot_token, chat_id, message_id):
-                    uploaded.pop(key, None)
+                    uploaded[key]["deleted"] = True
                     save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
                 continue
 
@@ -168,6 +173,7 @@ def main():
 
             # يُحفظ النجاح قبل الحذف. إذا فشل الحذف فلن يؤدي التشغيل التالي إلى إعادة الرفع.
             uploaded[key] = {
+                "status": "succeeded",
                 "chat_id": chat_id,
                 "message_id": message_id,
                 "video_id": video_id,
@@ -176,19 +182,27 @@ def main():
             save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
 
             if delete_message(bot_token, chat_id, message_id):
-                uploaded.pop(key, None)
+                uploaded[key]["deleted"] = True
                 save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
                 print(f"🗑️ حُذفت رسالة الرابط بعد نجاح الرفع: {message_id}")
             else:
                 print(f"⚠️ نجح الرفع لكن تعذر حذف الرسالة؛ لن يعاد الرفع: {message_id}")
 
-            send_message(bot_token, chat_id, f"✅ تم نشر الفيديو بنجاح:\n{video_url}")
+            add_result(
+                chat_id,
+                f"✅ تم نشر الطلب بنجاح\n"
+                f"🆔 رسالة الطلب: {message_id}\n"
+                f"🎬 المصدر: {url}\n"
+                f"📝 العنوان: {title}\n"
+                f"📺 YouTube: {video_url}\n"
+                f"ℹ️ إرسال نفس الرابط في رسالة جديدة سيُعامل كطلب جديد مستقل.",
+            )
 
         except Exception as e:
             err = f"{e}"
             print(f"❌ فشل: {err}")
             traceback.print_exc()
-            send_message(bot_token, chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
+            add_result(chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
 
         finally:
             for f in os.listdir(DOWNLOAD_DIR):
@@ -196,6 +210,14 @@ def main():
                     os.remove(os.path.join(DOWNLOAD_DIR, f))
                 except OSError:
                     pass
+
+    for chat_id, results in batch_results.items():
+        send_message(
+            bot_token,
+            chat_id,
+            f"📊 تقرير الدفعة — تم قبول {len(results)} رابط:\n\n"
+            + "\n\n".join(results),
+        )
 
     # دمج احتياطي أخير مع أحدث state/ من origin/main، حتى لو كانت هناك
     # تشغيلة موازية دفعت (push) تسجيلات نجاح جديدة أثناء تنفيذ هذا التشغيل.

@@ -1,7 +1,7 @@
 """
 إدارة طابور مقاطع خط long-smart.
 
-لكل رابط تمت معالجته بجيمناي، نحفظ ملف JSON واحد فيه 8 مقاطع مقترحة،
+لكل طلب Telegram تمت معالجته بجيمناي، نحفظ ملف JSON واحد فيه 8 مقاطع مقترحة،
 كل مقطع بحالة "pending" أو "published" أو "failed".
 
 كل تشغيل يومي: يمر على كل ملفات الطابور النشطة (فيها مقطع pending واحد
@@ -9,6 +9,7 @@
 عدم تجاوز سقف النشر اليومي المشترك لخط long-smart بالكامل (انظر publish_quota.py).
 """
 import glob
+import hashlib
 import json
 import os
 
@@ -21,25 +22,34 @@ def _queue_dir(state_dir: str) -> str:
     return path
 
 
-def _queue_file(state_dir: str, video_id: str) -> str:
-    return os.path.join(_queue_dir(state_dir), f"{video_id}.json")
+def queue_id_for_request(request_key: str) -> str:
+    """معرّف ملف ثابت وآمن مبني على chat_id:message_id، لا على الرابط."""
+    return hashlib.sha256(request_key.encode("utf-8")).hexdigest()[:24]
 
 
-def queue_exists(state_dir: str, video_id: str) -> bool:
-    return os.path.exists(_queue_file(state_dir, video_id))
+def _queue_file(state_dir: str, queue_id: str) -> str:
+    return os.path.join(_queue_dir(state_dir), f"{queue_id}.json")
+
+
+def queue_exists(state_dir: str, queue_id: str) -> bool:
+    return os.path.exists(_queue_file(state_dir, queue_id))
 
 
 def save_new_batch(
     state_dir: str,
+    queue_id: str,
+    request_key: str,
     video_id: str,
     source_url: str,
     source_title: str,
     chat_id: int,
     clips: list[dict],
 ) -> None:
-    """يحفظ دفعة جديدة من 8 مقاطع مقترحة لرابط جديد."""
+    """يحفظ دفعة جديدة من 8 مقاطع مرتبطة برسالة Telegram محددة."""
     data = {
         "video_id": video_id,
+        "queue_id": queue_id,
+        "request_key": request_key,
         "source_url": source_url,
         "source_title": source_title,
         "chat_id": chat_id,
@@ -52,7 +62,7 @@ def save_new_batch(
             for clip in clips
         ],
     }
-    with open(_queue_file(state_dir, video_id), "w", encoding="utf-8") as f:
+    with open(_queue_file(state_dir, queue_id), "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
@@ -84,16 +94,16 @@ def get_next_pending_index(batch: dict) -> int | None:
     return None
 
 
-def mark_clip_published(state_dir: str, video_id: str, clip_index: int, youtube_url: str) -> None:
-    path = _queue_file(state_dir, video_id)
+def mark_clip_published(state_dir: str, queue_id: str, clip_index: int, youtube_url: str) -> None:
+    path = _queue_file(state_dir, queue_id)
     data = _load_batch(path)
     data["clips"][clip_index]["status"] = "published"
     data["clips"][clip_index]["youtube_url"] = youtube_url
     _save_batch(path, data)
 
 
-def mark_clip_failed(state_dir: str, video_id: str, clip_index: int, error: str) -> None:
-    path = _queue_file(state_dir, video_id)
+def mark_clip_failed(state_dir: str, queue_id: str, clip_index: int, error: str) -> None:
+    path = _queue_file(state_dir, queue_id)
     data = _load_batch(path)
     data["clips"][clip_index]["status"] = "failed"
     data["clips"][clip_index]["error"] = error[:300]

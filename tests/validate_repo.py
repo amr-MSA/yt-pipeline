@@ -6,11 +6,12 @@ required_fragments = [
     'deno-version: v2.3.0',
     'pip install -q -r requirements.txt',
     'if: always()',
-    'git add state/long_offset.json state/long_uploaded_messages.json state/long_source_history.json || true',
+    'git add state/long_offset.json state/long_uploaded_messages.json || true',
 ]
 for fragment in required_fragments:
     assert fragment in workflow, fragment
 assert workflow.count('${{ secrets.LONG_BOT_TOKEN }}') == 1
 assert workflow.count('${{ secrets.YOUTUBE_TOKEN_JSON }}') == 1
 assert workflow.count('${{ secrets.YT_COOKIES }}') == 1
+assert 'long_source_history' not in workflow
 print('workflow structure: OK')

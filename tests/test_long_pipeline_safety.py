@@ -7,6 +7,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 
 import telegram_utils
+import queue_utils
 from cookie_utils import temporary_cookie_file
 
 
@@ -65,13 +66,6 @@ def test_cookie_file_is_private_and_deleted_after_context():
     assert not Path(path).exists()
 
 
-def test_source_history_persists_published_url():
-    with tempfile.TemporaryDirectory() as tmp:
-        telegram_utils.record_source_success(tmp, "long", "https://example.com/video/1", "yt123")
-        history = telegram_utils.load_source_history(tmp, "long")
-        assert history["https://example.com/video/1"]["video_id"] == "yt123"
-
-
 def test_boundary_marker_discards_links_before_it():
     updates = [
         {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/old"}},
@@ -117,10 +111,62 @@ def test_title_commands_update_the_previous_link():
     assert links[1].get("title_override") is None
 
 
+def test_pipeline_report_is_a_boundary_for_old_links():
+    updates = [
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/old"}},
+        {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "📊 تقرير الدفعة — تم قبول 1 رابط:\nhttps://youtu.be/old"}},
+        {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/new"}},
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    assert [item["url"] for item in links] == ["https://example.com/new"]
+
+
+def test_legacy_success_message_is_a_boundary_too():
+    updates = [
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/old"}},
+        {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "✅ تم نشر الفيديو بنجاح:\nhttps://youtu.be/old"}},
+        {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/new"}},
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    assert [item["url"] for item in links] == ["https://example.com/new"]
+
+
 def test_duplicate_links_have_independent_message_keys():
     first = {"chat_id": 7, "message_id": 101, "url": "https://youtu.be/same"}
     second = {"chat_id": 7, "message_id": 102, "url": "https://youtu.be/same"}
     assert telegram_utils.message_key(first) != telegram_utils.message_key(second)
+
+
+def test_duplicate_urls_in_different_messages_are_independent_requests():
+    first = {"chat_id": 7, "message_id": 100, "url": "https://youtu.be/same"}
+    second = {"chat_id": 7, "message_id": 101, "url": "https://youtu.be/same"}
+    assert telegram_utils.message_key(first) == "7:100"
+    assert telegram_utils.message_key(second) == "7:101"
+    assert queue_utils.queue_id_for_request(telegram_utils.message_key(first)) != queue_utils.queue_id_for_request(telegram_utils.message_key(second))
+
+
+def test_same_message_has_one_request_key():
+    first = {"chat_id": 7, "message_id": 100, "url": "https://youtu.be/a"}
+    repeated = {"chat_id": 7, "message_id": 100, "url": "https://youtu.be/a"}
+    assert telegram_utils.message_key(first) == telegram_utils.message_key(repeated)
+
+
+def test_long_smart_creates_separate_queues_for_same_url_messages():
+    with tempfile.TemporaryDirectory() as tmp:
+        clips = [{"type": "long", "start": 0, "end": 60, "title": "x", "description": "y"}]
+        first_key = "7:100"
+        second_key = "7:101"
+        queue_utils.save_new_batch(
+            tmp, queue_utils.queue_id_for_request(first_key), first_key,
+            "video-id", "https://youtu.be/same", "title", 7, clips,
+        )
+        queue_utils.save_new_batch(
+            tmp, queue_utils.queue_id_for_request(second_key), second_key,
+            "video-id", "https://youtu.be/same", "title", 7, clips,
+        )
+        assert len(queue_utils.list_active_batches(tmp)) == 2
 
 
 def test_upload_success_state_survives_delete_failure():

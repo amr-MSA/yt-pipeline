@@ -75,6 +75,7 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
         url = cmd["url"]
         chat_id = cmd["chat_id"]
         key = f"{chat_id}:{cmd['message_id']}"
+        queue_id = queue_utils.queue_id_for_request(key)
         print(f"\n{'='*50}\n[/long {idx}/{len(long_commands)}] معالجة: {url}")
 
         try:
@@ -82,20 +83,14 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
             transcript = fetch_transcript(url, os.path.join(WORK_DIR, f"t{idx}"), cookies_env)
             video_id = transcript["video_id"]
 
-            if queue_utils.queue_exists(STATE_DIR, video_id):
-                results[key] = "succeeded"
-                send_message(
-                    bot_token, chat_id,
-                    f"ℹ️ هذا الفيديو سبق معالجته بأمر /long، الطابور موجود مسبقًا:\n{url}",
-                )
-                continue
-
             print(f"✅ تم سحب {len(transcript['segments'])} جزء نصي. جاري إرسالها لجيمناي...")
             clips = suggest_clips(gemini_api_key, transcript["title"], transcript["segments"])
             print(f"✅ جيمناي اقترح {len(clips)} مقطع.")
 
             queue_utils.save_new_batch(
                 state_dir=STATE_DIR,
+                queue_id=queue_id,
+                request_key=key,
                 video_id=video_id,
                 source_url=url,
                 source_title=transcript["title"],
@@ -106,10 +101,15 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
 
             send_message(
                 bot_token, chat_id,
-                f"✅ تم تحليل الفيديو بنجاح عبر جيمناي، وحُفظت {len(clips)} مقاطع مقترحة "
+                f"✅ تم إنهاء الطلب بنجاح عبر جيمناي.\n"
+                f"🆔 رسالة الطلب: {cmd['message_id']}\n"
+                f"🎬 المصدر: {url}\n"
+                f"📝 العنوان: {transcript['title']}\n"
+                f"تم حفظ {len(clips)} مقاطع مقترحة "
                 f"في طابور النشر.\n\n"
                 f"📌 سيُنشر مقطع واحد يوميًا من هذا الفيديو تلقائيًا (ضمن الحد اليومي)، "
-                f"حتى تنتهي كل المقاطع.\n\nالفيديو المصدر: {transcript['title']}",
+                f"حتى تنتهي كل المقاطع.\n"
+                f"ℹ️ إرسال نفس الرابط في رسالة جديدة سيُعامل كطلب جديد مستقل.",
             )
 
         except Exception as e:
@@ -225,6 +225,7 @@ def run_daily_batch() -> None:
             break
 
         video_id = batch["video_id"]
+        queue_id = batch.get("queue_id", video_id)
         chat_id = batch["chat_id"]
         clip_idx = queue_utils.get_next_pending_index(batch)
         if clip_idx is None:
@@ -269,7 +270,7 @@ def run_daily_batch() -> None:
             video_url = f"https://youtu.be/{video_youtube_id}"
             print(f"✅ تم النشر: {video_url}")
 
-            queue_utils.mark_clip_published(STATE_DIR, video_id, clip_idx, video_url)
+            queue_utils.mark_clip_published(STATE_DIR, queue_id, clip_idx, video_url)
             publish_quota.record_publish_success(STATE_DIR)
 
             if bot_token:
@@ -293,10 +294,10 @@ def run_daily_batch() -> None:
                         "⚠️ تم الوصول لحد نشر يوتيوب اليومي (رصدناه من رسالة الخطأ). "
                         "سيتم إكمال النشر غدًا تلقائيًا.",
                     )
-                queue_utils.mark_clip_failed(STATE_DIR, video_id, clip_idx, err)
+                queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
                 break
 
-            queue_utils.mark_clip_failed(STATE_DIR, video_id, clip_idx, err)
+            queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
             if bot_token:
                 send_message(
                     bot_token, chat_id,

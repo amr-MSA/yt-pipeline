@@ -1,7 +1,4 @@
-"""
-أدوات التعامل مع بوت تلجرام: جلب الرسائل، استخراج الروابط، وإدارة رسائل
-الروابط التي تمت معالجتها بنجاح.
-"""
+"""أدوات التعامل مع بوت تلجرام وإدارة حالة الطلبات."""
 import json
 import os
 import re
@@ -25,6 +22,11 @@ TAKE_TITLE_COMMAND_RE = re.compile(r"^/take(?:@\w+)?$", re.IGNORECASE)
 DEFAULT_TITLE_COMMAND_RE = re.compile(r"^/d(?:@\w+)?$", re.IGNORECASE)
 CUSTOM_TITLE_COMMAND_RE = re.compile(
     r"^/t(?:@\w+)?\s+[\"“](.+?)[\"”]$", re.IGNORECASE | re.DOTALL
+)
+PIPELINE_REPORT_PREFIXES = (
+    "📊 تقرير الدفعة",
+    "✅ تم نشر الفيديو بنجاح:",
+    "📊 تم قبول ",
 )
 
 
@@ -56,6 +58,11 @@ def is_boundary_marker(text: str) -> bool:
     return all(not char.isalpha() for char in stripped) and any(
         char.isdigit() or not char.isspace() for char in stripped
     )
+
+
+def is_pipeline_report(text: str) -> bool:
+    """يتعرف على تقارير البوت حتى لا تُعاد روابط YouTube الموجودة داخلها."""
+    return text.strip().startswith(PIPELINE_REPORT_PREFIXES)
 
 
 def _apply_title_command(text: str, item: dict | None) -> bool:
@@ -108,6 +115,10 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
+        if is_pipeline_report(text):
+            links = []
+            last_link_by_chat = {}
+            continue
         if is_boundary_marker(text):
             links = []
             last_link_by_chat = {}
@@ -139,6 +150,10 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
+        if is_pipeline_report(text):
+            links = []
+            long_commands = []
+            continue
         if is_boundary_marker(text):
             links = []
             long_commands = []
@@ -281,43 +296,8 @@ def save_uploaded_messages(state_dir: str, bot_name: str, state: dict) -> None:
 
 
 def message_key(item: dict) -> str:
+    """هوية الطلب: نفس الرابط في رسالة أخرى يظل طلبًا مختلفًا."""
     return f"{item['chat_id']}:{item['message_id']}"
-
-
-def source_history_path(state_dir: str, bot_name: str) -> str:
-    return os.path.join(state_dir, f"{bot_name}_source_history.json")
-
-
-def load_source_history(state_dir: str, bot_name: str) -> dict:
-    """يقرأ سجل الروابط المنشورة حتى لا يؤدي تكرار رسالة الرابط إلى إعادة الرفع."""
-    path = source_history_path(state_dir, bot_name)
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def save_source_history(state_dir: str, bot_name: str, history: dict) -> None:
-    """يحفظ سجل المصادر باستبدال ذري ودمج آمن مع أحدث نسخة محلية."""
-    os.makedirs(state_dir, exist_ok=True)
-    path = source_history_path(state_dir, bot_name)
-    on_disk = load_source_history(state_dir, bot_name)
-    merged = dict(on_disk)
-    merged.update(history)
-    temp_path = f"{path}.tmp"
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
-    os.replace(temp_path, path)
-
-
-def record_source_success(state_dir: str, bot_name: str, source_url: str, video_id: str) -> None:
-    history = load_source_history(state_dir, bot_name)
-    history[source_url] = {"video_id": video_id}
-    save_source_history(state_dir, bot_name, history)
 
 
 def message_ledger_path(state_dir: str, bot_name: str) -> str:
@@ -396,17 +376,6 @@ def merge_latest_state(state_dir: str, bot_name: str) -> None:
                 combined.update(local)
                 save_message_ledger(state_dir, bot_name, combined)
 
-        remote_sources = subprocess.run(
-            ["git", "show", f"origin/main:state/{bot_name}_source_history.json"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if remote_sources.returncode == 0 and remote_sources.stdout.strip():
-            remote_data = json.loads(remote_sources.stdout)
-            if isinstance(remote_data, dict):
-                local = load_source_history(state_dir, bot_name)
-                combined = dict(remote_data)
-                combined.update(local)
-                save_source_history(state_dir, bot_name, combined)
     except Exception as e:
         # لا نوقف السير بسبب فشل الدمج الاحتياطي؛ نكتفي بتسجيل تحذير.
         # آلية retry/merge بخطوة الـ workflow تبقى خط الدفاع الثاني.
