@@ -46,6 +46,7 @@ DEFAULT_DESCRIPTION = """أستغفر الله العظيم واتوب إليه 
 
 
 def download_video(url: str, out_path: str) -> dict:
+    print(f"[LONG][DOWNLOAD] START: {url}", flush=True)
     ydl_opts = {
         "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/best",
         "outtmpl": out_path,
@@ -60,10 +61,13 @@ def download_video(url: str, out_path: str) -> dict:
         if cookie_path:
             ydl_opts["cookiefile"] = cookie_path
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=True)
+            info = ydl.extract_info(url, download=True)
+            print(f"[LONG][DOWNLOAD] OK: title={info.get('title', 'غير معروف')}", flush=True)
+            return info
 
 
 def upload_video(youtube, file_path: str, title: str, description: str) -> str:
+    print(f"[LONG][UPLOAD] START: file={file_path}, title={title[:80]}", flush=True)
     body = {
         "snippet": {
             "title": title[:100],
@@ -81,6 +85,7 @@ def upload_video(youtube, file_path: str, title: str, description: str) -> str:
     video_id = response.get("id")
     if not video_id:
         raise RuntimeError("نجح طلب YouTube دون إرجاع videoId؛ لن تُحذف رسالة Telegram")
+    print(f"[LONG][UPLOAD] OK: video_id={video_id}", flush=True)
     return video_id
 
 
@@ -99,22 +104,32 @@ def reconcile_uploaded_messages(bot_token: str, uploaded: dict) -> dict:
 
 
 def main():
+    print("[LONG][BOOT] START: تهيئة مسار اللونق", flush=True)
     bot_token = os.environ["LONG_BOT_TOKEN"]
     youtube_token_json = os.environ["YOUTUBE_TOKEN_JSON"]
+    print("[LONG][BOOT] OK: الأسرار المطلوبة موجودة (القيم مخفية)", flush=True)
 
     os.makedirs(STATE_DIR, exist_ok=True)
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    print("[LONG][BOOT] OK: مجلدات الحالة والتنزيل جاهزة", flush=True)
 
+    print("[LONG][STATE][1/3] START: قراءة سجل الرفع السابق", flush=True)
     uploaded = load_uploaded_messages(STATE_DIR, BOT_NAME)
+    print(f"[LONG][STATE][1/3] OK: عدد السجلات={len(uploaded)}", flush=True)
+    print("[LONG][STATE][2/3] START: معالجة الرسائل المرفوعة سابقًا", flush=True)
     reconciled = reconcile_uploaded_messages(bot_token, uploaded)
     if reconciled != uploaded:
         save_uploaded_messages(STATE_DIR, BOT_NAME, reconciled)
     uploaded = reconciled
+    print("[LONG][STATE][2/3] OK: اكتملت معالجة السجلات السابقة", flush=True)
 
     print("🔎 جاري فحص رسائل بوت لونق الجديدة...")
+    print("[LONG][TELEGRAM][1/2] START: جلب الرسائل الجديدة", flush=True)
     links = fetch_new_links(bot_token, STATE_DIR, BOT_NAME)
+    print(f"[LONG][TELEGRAM][1/2] OK: الروابط المقبولة={len(links)}", flush=True)
     if not links:
         print("📭 لا توجد روابط جديدة. إنهاء.")
+        print("[LONG][DONE] OK: لا توجد أعمال جديدة", flush=True)
         return
 
     print(f"📦 تم العثور على {len(links)} رابط جديد.")
@@ -123,7 +138,9 @@ def main():
     def add_result(chat_id: int, message: str) -> None:
         batch_results.setdefault(chat_id, []).append(message)
 
+    print("[LONG][AUTH] START: تجهيز اتصال YouTube قبل المعالجة", flush=True)
     youtube = get_youtube_client(youtube_token_json)
+    print("[LONG][AUTH] OK: اتصال YouTube جاهز", flush=True)
 
     for idx, item in enumerate(links, 1):
         url = item["url"]
@@ -210,21 +227,26 @@ def main():
                     os.remove(os.path.join(DOWNLOAD_DIR, f))
                 except OSError:
                     pass
+            print(f"[LONG][ITEM {idx}/{len(links)}] CLEANUP: اكتمل تنظيف ملفات التنزيل", flush=True)
 
     for chat_id, results in batch_results.items():
+        print(f"[LONG][TELEGRAM][2/2] START: إرسال تقرير الدفعة إلى chat_id={chat_id}", flush=True)
         send_message(
             bot_token,
             chat_id,
             f"📊 تقرير الدفعة — تم قبول {len(results)} رابط:\n\n"
             + "\n\n".join(results),
         )
+        print(f"[LONG][TELEGRAM][2/2] OK: تم إرسال التقرير إلى chat_id={chat_id}", flush=True)
 
     # دمج احتياطي أخير مع أحدث state/ من origin/main، حتى لو كانت هناك
     # تشغيلة موازية دفعت (push) تسجيلات نجاح جديدة أثناء تنفيذ هذا التشغيل.
     # هذا يمنع أن يعيد push الـ workflow اللاحق (rebase) الكتابة فوق
     # تسجيل نجاح حقيقي، وهو ما كان يؤدي لإعادة رفع نفس الفيديو.
     try:
+        print("[LONG][STATE][3/3] START: دمج الحالة الأخيرة من origin/main", flush=True)
         merge_latest_state(STATE_DIR, BOT_NAME)
+        print("[LONG][STATE][3/3] OK: اكتمل دمج الحالة", flush=True)
     except Exception as e:
         print(f"⚠️ تحذير: فشل الدمج الاحتياطي النهائي للحالة: {e}")
 

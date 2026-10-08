@@ -54,10 +54,11 @@ jobs:
       - name: Run long pipeline
         working-directory: scripts
         env:
+          PYTHONUNBUFFERED: '1'
           LONG_BOT_TOKEN: ${{ secrets.LONG_BOT_TOKEN }}
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-        run: python long_pipeline.py
+        run: python -u long_pipeline.py
 
       - name: Commit updated state (offsets and upload acknowledgements)
         if: always()
