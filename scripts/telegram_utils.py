@@ -4,7 +4,7 @@ import os
 import re
 import subprocess
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import requests
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
@@ -108,36 +108,83 @@ def save_offset(state_dir: str, bot_name: str, update_id: int) -> None:
         json.dump({"last_update_id": update_id}, f, ensure_ascii=False, indent=2)
 
 
-def pending_links_path(state_dir: str, bot_name: str) -> str:
-    return os.path.join(state_dir, f"{bot_name}_pending_links.json")
+def inbox_path(state_dir: str, bot_name: str) -> str:
+    return os.path.join(state_dir, f"{bot_name}_inbox.json")
 
 
-def load_pending_links(state_dir: str, bot_name: str) -> list[dict]:
-    path = pending_links_path(state_dir, bot_name)
+def canonicalize_url(url: str) -> str:
+    """يوحّد الرابط لإسقاط معاملات التتبع وصيغ YouTube المتكافئة."""
+    try:
+        parsed = urlsplit(url.strip())
+        host = (parsed.hostname or "").lower()
+        if host == "youtu.be":
+            video_id = parsed.path.strip("/")
+            if video_id:
+                return f"https://youtube.com/watch?v={video_id}"
+        if host in {"youtube.com", "m.youtube.com", "www.youtube.com"} and parsed.path == "/watch":
+            query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            if query.get("v"):
+                return f"https://youtube.com/watch?v={query['v']}"
+        tracking = {"fbclid", "gclid", "si", "feature", "igshid", "ref", "ref_src"}
+        query = [
+            (key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if not key.lower().startswith("utm_") and key.lower() not in tracking
+        ]
+        return urlunsplit((parsed.scheme.lower(), host, parsed.path.rstrip("/") or "/", urlencode(sorted(query)), ""))
+    except ValueError:
+        return url.strip()
+
+
+def _inbox_key(item: dict) -> str:
+    return item.get("canonical_url") or canonicalize_url(item["url"])
+
+
+def load_inbox(state_dir: str, bot_name: str) -> dict[str, dict]:
+    path = inbox_path(state_dir, bot_name)
     if not os.path.exists(path):
-        return []
+        # ترحيل آمن من النسخة القديمة ذات القائمة.
+        legacy = os.path.join(state_dir, f"{bot_name}_pending_links.json")
+        path = legacy if os.path.exists(legacy) else path
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, list) else []
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            return {_inbox_key(item): {**item, "canonical_url": _inbox_key(item)} for item in data}
     except (OSError, ValueError):
-        return []
+        pass
+    return {}
 
 
-def save_pending_links(state_dir: str, bot_name: str, links: list[dict]) -> None:
+def save_inbox(state_dir: str, bot_name: str, inbox: dict[str, dict]) -> None:
     os.makedirs(state_dir, exist_ok=True)
-    path = pending_links_path(state_dir, bot_name)
+    path = inbox_path(state_dir, bot_name)
     temp_path = f"{path}.tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(links, f, ensure_ascii=False, indent=2)
+        json.dump(inbox, f, ensure_ascii=False, indent=2, sort_keys=True)
     os.replace(temp_path, path)
 
 
+# أسماء توافقية للكود والاختبارات القديمة.
+def load_pending_links(state_dir: str, bot_name: str) -> list[dict]:
+    return list(load_inbox(state_dir, bot_name).values())
+
+
+def save_pending_links(state_dir: str, bot_name: str, links: list[dict]) -> None:
+    save_inbox(state_dir, bot_name, {_inbox_key(item): {**item, "canonical_url": _inbox_key(item)} for item in links})
+
+
 def acknowledge_pending_link(state_dir: str, bot_name: str, item: dict) -> None:
-    """يحذف الرابط من صندوق الانتظار بعد نجاح النشر أو تخطي طلب مسجل."""
-    key = message_key(item)
-    remaining = [x for x in load_pending_links(state_dir, bot_name) if message_key(x) != key]
-    save_pending_links(state_dir, bot_name, remaining)
+    """يحذف الرابط من الـ Inbox بعد نجاح النشر أو تخطي طلب مسجل."""
+    inbox = load_inbox(state_dir, bot_name)
+    inbox.pop(_inbox_key(item), None)
+    save_inbox(state_dir, bot_name, inbox)
+
+
+def _acknowledge_updates(state_dir: str, bot_name: str, updates: list[dict]) -> None:
+    if updates:
+        save_offset(state_dir, bot_name, max(upd["update_id"] for upd in updates))
 
 
 def fetch_new_links(
@@ -145,26 +192,17 @@ def fetch_new_links(
     state_dir: str,
     bot_name: str,
     run_mode: str = "daily",
+    window_seconds: int = 60 * 60,
 ) -> list[dict]:
-    """يجلب الروابط مع حماية الدفعات غير المختارة من فقدانها.
-
-    التشغيل اليدوي يعيد أحدث رسالة فقط، أما التشغيل اليومي فيعيد الرسائل
-    التي وصلت خلال آخر 24 ساعة. كل الرسائل تبقى في صندوق الانتظار حتى يؤكد
-    مسار النشر نجاحها، لذلك لا يؤدي تحديث Telegram offset إلى فقدان الروابط.
-    """
+    """يملأ Inbox بقاموس روابط فريد ثم يعيد روابط آخر ساعة أو الأحدث يدويًا."""
     updates = _fetch_updates(bot_token, state_dir, bot_name)
-    pending = load_pending_links(state_dir, bot_name)
+    inbox = load_inbox(state_dir, bot_name)
     new_links: list[dict] = []
-    known_keys = {message_key(item) for item in pending}
     last_link_by_chat: dict[int, dict] = {}
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
-        if is_pipeline_report(text):
-            new_links = []
-            last_link_by_chat = {}
-            continue
-        if is_boundary_marker(text):
+        if is_pipeline_report(text) or is_boundary_marker(text):
             new_links = []
             last_link_by_chat = {}
             continue
@@ -174,36 +212,34 @@ def fetch_new_links(
         if LONG_COMMAND_RE.search(text):
             continue
         for u in extract_urls(text):
+            canonical = canonicalize_url(u)
             item = {
                 "url": u,
+                "canonical_url": canonical,
                 "chat_id": chat_id,
                 "message_id": msg["message_id"],
-                "update_id": msg.get("update_id"),
                 "date": int(msg.get("date", time.time())),
                 "text": text.strip(),
                 "title_mode": "default",
             }
-            if message_key(item) not in known_keys:
+            # التكرار الذكي: نفس الرابط بصيغة مختلفة أو مع tracking لا ينشئ طلبًا جديدًا.
+            if canonical not in inbox and not any(_inbox_key(x) == canonical for x in new_links):
                 new_links.append(item)
-                known_keys.add(message_key(item))
             last_link_by_chat[chat_id] = item
 
-    links = pending + new_links
-    if not links:
-        save_pending_links(state_dir, bot_name, [])
+    for item in new_links:
+        inbox.setdefault(_inbox_key(item), item)
+
+    # نقطة الأمان: احفظ الـ Inbox أولًا، ثم أكد Telegram offset.
+    save_inbox(state_dir, bot_name, inbox)
+    _acknowledge_updates(state_dir, bot_name, updates)
+
+    if not inbox:
         return []
-
     if run_mode == "manual":
-        latest = max(links, key=lambda x: (x.get("date", 0), x.get("update_id") or 0, x["message_id"]))
-        selected = [latest]
-    else:
-        cutoff = int(time.time()) - 24 * 60 * 60
-        selected = [item for item in links if item.get("date", 0) >= cutoff]
-
-    # لا نحذف أي عنصر هنا؛ acknowledge_pending_link يحذفه فقط بعد نجاح النشر.
-    save_pending_links(state_dir, bot_name, links)
-    return selected
-
+        return [max(inbox.values(), key=lambda x: (x.get("date", 0), x["message_id"]))]
+    cutoff = int(time.time()) - window_seconds
+    return [item for item in inbox.values() if item.get("date", 0) >= cutoff]
 
 def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tuple[list[dict], list[dict]]:
     """يجلب دفعة واحدة ويفرزها إلى روابط عادية وأوامر /long."""
@@ -245,6 +281,8 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
                 }
             )
 
+    # هذا المسار لا يملك Inbox بعد؛ لا نؤكد Telegram إلا بعد اكتمال القراءة.
+    _acknowledge_updates(state_dir, bot_name, updates)
     return links, long_commands
 
 
@@ -268,10 +306,6 @@ def _fetch_updates(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
         raise RuntimeError(f"فشل استدعاء Telegram API: {data}")
 
     updates = data.get("result", [])
-    if updates:
-        max_update_id = max(upd["update_id"] for upd in updates)
-        save_offset(state_dir, bot_name, max(max_update_id, last_offset))
-
     return updates
 
 

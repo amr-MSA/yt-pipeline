@@ -18,6 +18,7 @@ from telegram_utils import (
     delete_message,
     fetch_new_links,
     acknowledge_pending_link,
+    canonicalize_url,
     load_uploaded_messages,
     merge_latest_state,
     message_key,
@@ -157,9 +158,15 @@ def main():
 
         try:
             # قد تكون الرسالة عادت من دفعة قديمة؛ لا نعيد الرفع إذا كان النجاح مسجلاً.
-            if key in uploaded:
+            canonical_url = item.get("canonical_url") or canonicalize_url(url)
+            duplicate_upload = any(
+                record.get("status") == "succeeded"
+                and canonicalize_url(record.get("url", "")) == canonical_url
+                for record in uploaded.values()
+            )
+            if key in uploaded or duplicate_upload:
                 print(f"ℹ️ الرفع مسجل مسبقًا لهذه الرسالة؛ لن يعاد رفعها: {key}")
-                add_result(chat_id, "⏭️ تم تجاوز رابط سبق تسجيل رفعه لهذه الرسالة.")
+                add_result(chat_id, "⏭️ تم تجاوز رابط مكرر سبق نشره.")
                 acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
                 if delete_message(bot_token, chat_id, message_id):
                     uploaded[key]["deleted"] = True

@@ -219,4 +219,15 @@ def test_acknowledging_manual_success_removes_only_that_link():
         latest = {"chat_id": 7, "message_id": 11, "url": "https://example.com/latest"}
         telegram_utils.save_pending_links(tmp, "long", [old, latest])
         telegram_utils.acknowledge_pending_link(tmp, "long", latest)
-        assert telegram_utils.load_pending_links(tmp, "long") == [old]
+        remaining = telegram_utils.load_pending_links(tmp, "long")
+        assert len(remaining) == 1
+        assert remaining[0]["url"] == old["url"]
+
+
+def test_canonical_url_collapses_youtube_variants_and_tracking_parameters():
+    assert telegram_utils.canonicalize_url("https://youtu.be/abc123?si=tracking") == (
+        "https://youtube.com/watch?v=abc123"
+    )
+    assert telegram_utils.canonicalize_url(
+        "https://www.youtube.com/watch?v=abc123&utm_source=test&feature=share"
+    ) == "https://youtube.com/watch?v=abc123"
