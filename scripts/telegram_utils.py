@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from urllib.parse import urlsplit
 import requests
 
@@ -107,20 +108,64 @@ def save_offset(state_dir: str, bot_name: str, update_id: int) -> None:
         json.dump({"last_update_id": update_id}, f, ensure_ascii=False, indent=2)
 
 
-def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]:
-    """يجلب الروابط الجديدة، مع إبقاء كل رسالة كعنصر مستقل حتى عند تكرار الرابط."""
+def pending_links_path(state_dir: str, bot_name: str) -> str:
+    return os.path.join(state_dir, f"{bot_name}_pending_links.json")
+
+
+def load_pending_links(state_dir: str, bot_name: str) -> list[dict]:
+    path = pending_links_path(state_dir, bot_name)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_pending_links(state_dir: str, bot_name: str, links: list[dict]) -> None:
+    os.makedirs(state_dir, exist_ok=True)
+    path = pending_links_path(state_dir, bot_name)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(links, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
+
+
+def acknowledge_pending_link(state_dir: str, bot_name: str, item: dict) -> None:
+    """يحذف الرابط من صندوق الانتظار بعد نجاح النشر أو تخطي طلب مسجل."""
+    key = message_key(item)
+    remaining = [x for x in load_pending_links(state_dir, bot_name) if message_key(x) != key]
+    save_pending_links(state_dir, bot_name, remaining)
+
+
+def fetch_new_links(
+    bot_token: str,
+    state_dir: str,
+    bot_name: str,
+    run_mode: str = "daily",
+) -> list[dict]:
+    """يجلب الروابط مع حماية الدفعات غير المختارة من فقدانها.
+
+    التشغيل اليدوي يعيد أحدث رسالة فقط، أما التشغيل اليومي فيعيد الرسائل
+    التي وصلت خلال آخر 24 ساعة. كل الرسائل تبقى في صندوق الانتظار حتى يؤكد
+    مسار النشر نجاحها، لذلك لا يؤدي تحديث Telegram offset إلى فقدان الروابط.
+    """
     updates = _fetch_updates(bot_token, state_dir, bot_name)
-    links = []
+    pending = load_pending_links(state_dir, bot_name)
+    new_links: list[dict] = []
+    known_keys = {message_key(item) for item in pending}
     last_link_by_chat: dict[int, dict] = {}
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
         if is_pipeline_report(text):
-            links = []
+            new_links = []
             last_link_by_chat = {}
             continue
         if is_boundary_marker(text):
-            links = []
+            new_links = []
             last_link_by_chat = {}
             continue
         chat_id = msg["chat"]["id"]
@@ -130,16 +175,34 @@ def fetch_new_links(bot_token: str, state_dir: str, bot_name: str) -> list[dict]
             continue
         for u in extract_urls(text):
             item = {
-                    "url": u,
-                    "chat_id": chat_id,
-                    "message_id": msg["message_id"],
-                    "text": text.strip(),
-                    "title_mode": "default",
-                }
-            links.append(item)
+                "url": u,
+                "chat_id": chat_id,
+                "message_id": msg["message_id"],
+                "update_id": msg.get("update_id"),
+                "date": int(msg.get("date", time.time())),
+                "text": text.strip(),
+                "title_mode": "default",
+            }
+            if message_key(item) not in known_keys:
+                new_links.append(item)
+                known_keys.add(message_key(item))
             last_link_by_chat[chat_id] = item
 
-    return links
+    links = pending + new_links
+    if not links:
+        save_pending_links(state_dir, bot_name, [])
+        return []
+
+    if run_mode == "manual":
+        latest = max(links, key=lambda x: (x.get("date", 0), x.get("update_id") or 0, x["message_id"]))
+        selected = [latest]
+    else:
+        cutoff = int(time.time()) - 24 * 60 * 60
+        selected = [item for item in links if item.get("date", 0) >= cutoff]
+
+    # لا نحذف أي عنصر هنا؛ acknowledge_pending_link يحذفه فقط بعد نجاح النشر.
+    save_pending_links(state_dir, bot_name, links)
+    return selected
 
 
 def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tuple[list[dict], list[dict]]:

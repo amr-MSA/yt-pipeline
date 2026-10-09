@@ -17,6 +17,7 @@ from cookie_utils import temporary_cookie_file
 from telegram_utils import (
     delete_message,
     fetch_new_links,
+    acknowledge_pending_link,
     load_uploaded_messages,
     merge_latest_state,
     message_key,
@@ -107,6 +108,10 @@ def main():
     print("[LONG][BOOT] START: تهيئة مسار اللونق", flush=True)
     bot_token = os.environ["LONG_BOT_TOKEN"]
     youtube_token_json = os.environ["YOUTUBE_TOKEN_JSON"]
+    run_mode = os.environ.get("PIPELINE_RUN_MODE", "daily").lower()
+    if run_mode not in {"daily", "manual"}:
+        run_mode = "daily"
+    print(f"[LONG][MODE] {run_mode}", flush=True)
     print("[LONG][BOOT] OK: الأسرار المطلوبة موجودة (القيم مخفية)", flush=True)
 
     os.makedirs(STATE_DIR, exist_ok=True)
@@ -125,7 +130,7 @@ def main():
 
     print("🔎 جاري فحص رسائل بوت لونق الجديدة...")
     print("[LONG][TELEGRAM][1/2] START: جلب الرسائل الجديدة", flush=True)
-    links = fetch_new_links(bot_token, STATE_DIR, BOT_NAME)
+    links = fetch_new_links(bot_token, STATE_DIR, BOT_NAME, run_mode=run_mode)
     print(f"[LONG][TELEGRAM][1/2] OK: الروابط المقبولة={len(links)}", flush=True)
     if not links:
         print("📭 لا توجد روابط جديدة. إنهاء.")
@@ -155,6 +160,7 @@ def main():
             if key in uploaded:
                 print(f"ℹ️ الرفع مسجل مسبقًا لهذه الرسالة؛ لن يعاد رفعها: {key}")
                 add_result(chat_id, "⏭️ تم تجاوز رابط سبق تسجيل رفعه لهذه الرسالة.")
+                acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
                 if delete_message(bot_token, chat_id, message_id):
                     uploaded[key]["deleted"] = True
                     save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
@@ -197,6 +203,7 @@ def main():
                 "url": url,
             }
             save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+            acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
 
             if delete_message(bot_token, chat_id, message_id):
                 uploaded[key]["deleted"] = True

@@ -104,8 +104,8 @@ def test_title_commands_update_the_previous_link():
         {"update_id": 4, "message": {"message_id": 4, "chat": {"id": 7}, "text": "/t \"عنوان مخصص\""}},
         {"update_id": 5, "message": {"message_id": 5, "chat": {"id": 7}, "text": "/d"}},
     ]
-    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
-        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    with tempfile.TemporaryDirectory() as tmp, patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", tmp, "long")
     assert links[0]["title_mode"] == "source"
     assert links[1]["title_mode"] == "default"
     assert links[1].get("title_override") is None
@@ -117,8 +117,8 @@ def test_pipeline_report_is_a_boundary_for_old_links():
         {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "📊 تقرير الدفعة — تم قبول 1 رابط:\nhttps://youtu.be/old"}},
         {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/new"}},
     ]
-    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
-        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    with tempfile.TemporaryDirectory() as tmp, patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", tmp, "long")
     assert [item["url"] for item in links] == ["https://example.com/new"]
 
 
@@ -128,8 +128,8 @@ def test_legacy_success_message_is_a_boundary_too():
         {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "✅ تم نشر الفيديو بنجاح:\nhttps://youtu.be/old"}},
         {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": "https://example.com/new"}},
     ]
-    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
-        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    with tempfile.TemporaryDirectory() as tmp, patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", tmp, "long")
     assert [item["url"] for item in links] == ["https://example.com/new"]
 
 
@@ -198,3 +198,25 @@ def test_delete_requires_telegram_ok():
 
     with patch.object(telegram_utils.requests, "post", return_value=Response()):
         assert not telegram_utils.delete_message("token", 7, 101)
+
+
+def test_manual_run_selects_only_latest_and_keeps_older_links_pending():
+    updates = [
+        {"update_id": 1, "message": {"message_id": 10, "chat": {"id": 7}, "date": 100, "text": "https://example.com/old"}},
+        {"update_id": 2, "message": {"message_id": 11, "chat": {"id": 7}, "date": 200, "text": "https://example.com/latest"}},
+    ]
+    with tempfile.TemporaryDirectory() as tmp, patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        selected = telegram_utils.fetch_new_links("token", tmp, "long", run_mode="manual")
+        assert [item["url"] for item in selected] == ["https://example.com/latest"]
+        assert {item["url"] for item in telegram_utils.load_pending_links(tmp, "long")} == {
+            "https://example.com/old", "https://example.com/latest"
+        }
+
+
+def test_acknowledging_manual_success_removes_only_that_link():
+    with tempfile.TemporaryDirectory() as tmp:
+        old = {"chat_id": 7, "message_id": 10, "url": "https://example.com/old"}
+        latest = {"chat_id": 7, "message_id": 11, "url": "https://example.com/latest"}
+        telegram_utils.save_pending_links(tmp, "long", [old, latest])
+        telegram_utils.acknowledge_pending_link(tmp, "long", latest)
+        assert telegram_utils.load_pending_links(tmp, "long") == [old]
