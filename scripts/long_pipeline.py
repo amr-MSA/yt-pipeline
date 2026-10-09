@@ -8,6 +8,7 @@
 """
 import os
 import sys
+import time
 import traceback
 
 import yt_dlp
@@ -19,9 +20,12 @@ from telegram_utils import (
     fetch_new_links,
     acknowledge_pending_link,
     canonicalize_url,
+    PUBLISHED_URL_TTL_SECONDS,
+    load_published_urls,
     load_uploaded_messages,
     merge_latest_state,
     message_key,
+    record_published_url,
     save_uploaded_messages,
     send_message,
 )
@@ -128,6 +132,8 @@ def main():
         save_uploaded_messages(STATE_DIR, BOT_NAME, reconciled)
     uploaded = reconciled
     print("[LONG][STATE][2/3] OK: اكتملت معالجة السجلات السابقة", flush=True)
+    published_urls = load_published_urls(STATE_DIR, BOT_NAME)
+    print(f"[LONG][STATE][2/3] OK: الروابط المنشورة النشطة خلال 48 ساعة={len(published_urls)}", flush=True)
 
     print("🔎 جاري فحص رسائل بوت لونق الجديدة...")
     print("[LONG][TELEGRAM][1/2] START: جلب الرسائل الجديدة", flush=True)
@@ -159,18 +165,24 @@ def main():
         try:
             # قد تكون الرسالة عادت من دفعة قديمة؛ لا نعيد الرفع إذا كان النجاح مسجلاً.
             canonical_url = item.get("canonical_url") or canonicalize_url(url)
-            duplicate_upload = any(
+            # منع التكرار لرابط في رسالة جديدة يعتمد على سجل TTL؛ أما سجل
+            # الرسالة فيبقى مخصصًا لحماية نفس الطلب إذا عاد Telegram بالتحديث نفسه.
+            now = int(time.time())
+            duplicate_upload = canonical_url in published_urls or any(
                 record.get("status") == "succeeded"
+                and record.get("published_at", 0) + PUBLISHED_URL_TTL_SECONDS > now
                 and canonicalize_url(record.get("url", "")) == canonical_url
                 for record in uploaded.values()
             )
-            if key in uploaded or duplicate_upload:
+            existing_request = uploaded.get(key)
+            if existing_request or duplicate_upload:
                 print(f"ℹ️ الرفع مسجل مسبقًا لهذه الرسالة؛ لن يعاد رفعها: {key}")
                 add_result(chat_id, "⏭️ تم تجاوز رابط مكرر سبق نشره.")
                 acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
                 if delete_message(bot_token, chat_id, message_id):
-                    uploaded[key]["deleted"] = True
-                    save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+                    if existing_request is not None:
+                        existing_request["deleted"] = True
+                        save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
                 continue
 
             print("⬇️ تحميل الفيديو...")
@@ -217,8 +229,11 @@ def main():
                 "message_id": message_id,
                 "video_id": video_id,
                 "url": url,
+                "published_at": int(time.time()),
             }
             save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+            record_published_url(STATE_DIR, BOT_NAME, url, video_id)
+            published_urls = load_published_urls(STATE_DIR, BOT_NAME)
             acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
 
             if delete_message(bot_token, chat_id, message_id):
@@ -235,7 +250,7 @@ def main():
                 f"🎬 المصدر: {url}\n"
                 f"📝 العنوان: {title}\n"
                 f"📺 YouTube: {video_url}\n"
-                f"ℹ️ إرسال نفس الرابط في رسالة جديدة سيُعامل كطلب جديد مستقل.",
+                f"ℹ️ لن يُعاد نشر نفس الرابط خلال 48 ساعة.",
             )
 
         except Exception as e:

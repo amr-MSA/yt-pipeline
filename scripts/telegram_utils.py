@@ -166,6 +166,73 @@ def save_inbox(state_dir: str, bot_name: str, inbox: dict[str, dict]) -> None:
     os.replace(temp_path, path)
 
 
+PUBLISHED_URL_TTL_SECONDS = 48 * 60 * 60
+
+
+def published_urls_path(state_dir: str, bot_name: str) -> str:
+    return os.path.join(state_dir, f"{bot_name}_published_urls.json")
+
+
+def _save_json_atomic(path: str, data: dict) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+    os.replace(temp_path, path)
+
+
+def load_published_urls(
+    state_dir: str,
+    bot_name: str,
+    now: int | None = None,
+    ttl_seconds: int = PUBLISHED_URL_TTL_SECONDS,
+) -> dict[str, dict]:
+    """يقرأ سجل الروابط المنشورة وينظفه لكل رابط على حدة بعد انتهاء TTL."""
+    path = published_urls_path(state_dir, bot_name)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    current = int(time.time() if now is None else now)
+    active = {}
+    for key, record in data.items():
+        if not isinstance(record, dict):
+            continue
+        published_at = int(record.get("published_at", 0) or 0)
+        expires_at = int(record.get("expires_at", published_at + ttl_seconds) or 0)
+        if published_at and expires_at > current:
+            active[key] = {**record, "expires_at": expires_at}
+    if active != data:
+        _save_json_atomic(path, active)
+    return active
+
+
+def record_published_url(
+    state_dir: str,
+    bot_name: str,
+    url: str,
+    video_id: str,
+    now: int | None = None,
+    ttl_seconds: int = PUBLISHED_URL_TTL_SECONDS,
+) -> dict:
+    """يسجل رابطًا منشورًا مع انتهاء مستقل بعد 48 ساعة."""
+    current = int(time.time() if now is None else now)
+    published = load_published_urls(state_dir, bot_name, now=current, ttl_seconds=ttl_seconds)
+    canonical = canonicalize_url(url)
+    published[canonical] = {
+        "url": url,
+        "canonical_url": canonical,
+        "video_id": video_id,
+        "published_at": current,
+        "expires_at": current + ttl_seconds,
+    }
+    _save_json_atomic(published_urls_path(state_dir, bot_name), published)
+    return published[canonical]
+
+
 # أسماء توافقية للكود والاختبارات القديمة.
 def load_pending_links(state_dir: str, bot_name: str) -> list[dict]:
     return list(load_inbox(state_dir, bot_name).values())
@@ -194,7 +261,7 @@ def fetch_new_links(
     run_mode: str = "daily",
     window_seconds: int = 60 * 60,
 ) -> list[dict]:
-    """يملأ Inbox بقاموس روابط فريد ثم يعيد روابط آخر ساعة أو الأحدث يدويًا."""
+    """يملأ Inbox بقاموس فريد ثم يعيد كل الروابط المعلقة بترتيب الأقدم."""
     updates = _fetch_updates(bot_token, state_dir, bot_name)
     inbox = load_inbox(state_dir, bot_name)
     new_links: list[dict] = []
@@ -238,8 +305,10 @@ def fetch_new_links(
         return []
     if run_mode == "manual":
         return [max(inbox.values(), key=lambda x: (x.get("date", 0), x["message_id"]))]
-    cutoff = int(time.time()) - window_seconds
-    return [item for item in inbox.values() if item.get("date", 0) >= cutoff]
+    return sorted(
+        inbox.values(),
+        key=lambda x: (x.get("date", 0), x.get("message_id", 0)),
+    )
 
 def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tuple[list[dict], list[dict]]:
     """يجلب دفعة واحدة ويفرزها إلى روابط عادية وأوامر /long."""

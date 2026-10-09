@@ -231,3 +231,37 @@ def test_canonical_url_collapses_youtube_variants_and_tracking_parameters():
     assert telegram_utils.canonicalize_url(
         "https://www.youtube.com/watch?v=abc123&utm_source=test&feature=share"
     ) == "https://youtube.com/watch?v=abc123"
+
+
+def test_daily_fetch_returns_old_pending_inbox_items_for_retry():
+    with tempfile.TemporaryDirectory() as tmp:
+        old = {
+            "url": "https://example.com/old",
+            "canonical_url": "https://example.com/old",
+            "chat_id": 7,
+            "message_id": 10,
+            "date": 1,
+            "title_mode": "default",
+        }
+        telegram_utils.save_inbox(tmp, "long", {old["canonical_url"]: old})
+        with patch.object(telegram_utils, "_fetch_updates", return_value=[]):
+            links = telegram_utils.fetch_new_links("token", tmp, "long", window_seconds=1)
+        assert [item["url"] for item in links] == [old["url"]]
+
+
+def test_published_url_expiry_is_individual_and_not_file_wide():
+    with tempfile.TemporaryDirectory() as tmp:
+        telegram_utils.record_published_url(tmp, "long", "https://example.com/old", "v-old", now=100)
+        telegram_utils.record_published_url(tmp, "long", "https://example.com/new", "v-new", now=200)
+        active = telegram_utils.load_published_urls(tmp, "long", now=100 + 48 * 60 * 60 + 1)
+        assert "https://example.com/old" not in active
+        assert "https://example.com/new" in active
+
+
+def test_published_url_uses_canonical_key_and_blocks_variants_within_ttl():
+    with tempfile.TemporaryDirectory() as tmp:
+        telegram_utils.record_published_url(
+            tmp, "long", "https://youtu.be/abc123?si=tracking", "video-id", now=100
+        )
+        active = telegram_utils.load_published_urls(tmp, "long", now=101)
+        assert "https://youtube.com/watch?v=abc123" in active
