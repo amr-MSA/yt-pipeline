@@ -189,6 +189,15 @@ def main():
             if not os.path.isfile(actual_file):
                 raise FileNotFoundError("yt-dlp لم ينتج ملف الفيديو المتوقع.")
 
+            # سجّل بدء طلب الرفع قبل استدعاء YouTube. إذا انقطع الاتصال بعد
+            # قبول الطلب فلن نملك videoId، لذلك نمنع إعادة الرفع التلقائي.
+            uploaded[key] = {
+                "status": "uploading",
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "url": url,
+            }
+            save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
             print("📤 رفع على يوتيوب (public)...")
             video_id = upload_video(youtube, actual_file, title, desc)
             video_url = f"https://youtu.be/{video_id}"
@@ -226,6 +235,11 @@ def main():
             err = f"{e}"
             print(f"❌ فشل: {err}")
             traceback.print_exc()
+            if uploaded.get(key, {}).get("status") == "uploading":
+                uploaded[key]["status"] = "upload_unknown"
+                uploaded[key]["error"] = err[:500]
+                save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+                print("⚠️ حالة الرفع غير مؤكدة؛ لن تتم إعادة المحاولة تلقائيًا.")
             add_result(chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
 
         finally:
