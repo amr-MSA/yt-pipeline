@@ -59,7 +59,9 @@ jobs:
           set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add state/long_offset.json state/long_inbox.json state/long_uploaded_messages.json state/long_published_urls.json || true
+          # أضف كل ملفات الحالة الموجودة؛ لا تستخدم pathspec لملفات قد لا تكون
+          # أنشئت في أول تشغيل، لأن git add سيفشل ويمنع حفظ بقية الحالة.
+          git add -A state/
           if git diff --cached --quiet; then
             echo "لا تغييرات في الحالة."
             exit 0

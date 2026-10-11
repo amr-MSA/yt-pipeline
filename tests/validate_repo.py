@@ -6,7 +6,7 @@ required_fragments = [
     'deno-version: v2.3.0',
     'pip install -q -r requirements.txt',
     'if: always()',
-    'git add state/long_offset.json state/long_inbox.json state/long_uploaded_messages.json state/long_published_urls.json || true',
+    'git add -A state/',
 ]
 for fragment in required_fragments:
     assert fragment in workflow, fragment

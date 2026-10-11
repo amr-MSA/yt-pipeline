@@ -34,7 +34,8 @@ from youtube_auth import get_youtube_client
 STATE_DIR = "state"
 DOWNLOAD_DIR = "downloads_long"
 BOT_NAME = "long"
-DEFAULT_TITLE = "ارح قلبك بهذه التلاوة العطرة"
+DEFAULT_TITLE = "مقطع اليوم"
+YOUTUBE_TITLE_MAX = 100
 DEFAULT_DESCRIPTION = """أستغفر الله العظيم واتوب إليه 🤲
 
 
@@ -93,6 +94,19 @@ def upload_video(youtube, file_path: str, title: str, description: str) -> str:
         raise RuntimeError("نجح طلب YouTube دون إرجاع videoId؛ لن تُحذف رسالة Telegram")
     print(f"[LONG][UPLOAD] OK: video_id={video_id}", flush=True)
     return video_id
+
+
+def resolve_title(source_title: str | None, title_mode: str, title_override: str | None = None) -> str:
+    """يستخدم عنوان المصدر، ويعود إلى «مقطع اليوم» إذا كان مفقودًا أو طويلًا."""
+    if title_mode == "custom" and title_override:
+        custom = title_override.strip()
+        return custom[:YOUTUBE_TITLE_MAX] if custom else DEFAULT_TITLE
+    if title_mode == "default":
+        return DEFAULT_TITLE
+    title = (source_title or "").strip()
+    if title and len(title) <= YOUTUBE_TITLE_MAX:
+        return title
+    return DEFAULT_TITLE
 
 
 def reconcile_uploaded_messages(bot_token: str, uploaded: dict) -> dict:
@@ -187,15 +201,10 @@ def main():
 
             print("⬇️ تحميل الفيديو...")
             info = download_video(url, raw_path)
-            source_title = info.get("title", "فيديو جديد")
+            source_title = info.get("title") or ""
             desc = info.get("description", "") or DEFAULT_DESCRIPTION
             title_mode = item.get("title_mode", "default")
-            if title_mode == "source":
-                title = source_title
-            elif title_mode == "custom" and item.get("title_override"):
-                title = item["title_override"]
-            else:
-                title = DEFAULT_TITLE
+            title = resolve_title(source_title, title_mode, item.get("title_override"))
 
             actual_file = raw_path
             if not os.path.exists(actual_file):

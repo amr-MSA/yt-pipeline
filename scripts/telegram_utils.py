@@ -287,7 +287,7 @@ def fetch_new_links(
                 "message_id": msg["message_id"],
                 "date": int(msg.get("date", time.time())),
                 "text": text.strip(),
-                "title_mode": "default",
+                "title_mode": "source",
             }
             # التكرار الذكي: نفس الرابط بصيغة مختلفة أو مع tracking لا ينشئ طلبًا جديدًا.
             if canonical not in inbox and not any(_inbox_key(x) == canonical for x in new_links):
