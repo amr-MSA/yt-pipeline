@@ -175,12 +175,37 @@ def main():
 
     print(f"📦 تم العثور على {len(links)} رابط جديد.")
     batch_results: dict[int, list[str]] = {}
+    unpublished_results: dict[int, list[str]] = {}
 
     def add_result(chat_id: int, message: str) -> None:
         batch_results.setdefault(chat_id, []).append(message)
 
+    def add_unpublished(chat_id: int, message: str) -> None:
+        unpublished_results.setdefault(chat_id, []).append(message)
+
+    def send_unpublished_reports() -> None:
+        for chat_id, results in unpublished_results.items():
+            report = (
+                "⚠️ تقرير إضافي — مقاطع لم تُنشر أو لم يُؤكَّد نشرها:\n\n"
+                + "\n\n".join(results)
+            )
+            # لا نتجاوز حد رسالة Telegram إذا كانت الدفعة كبيرة.
+            for start in range(0, len(report), 3800):
+                send_message(bot_token, chat_id, report[start:start + 3800])
+
     print("[LONG][AUTH] START: تجهيز اتصال YouTube قبل المعالجة", flush=True)
-    youtube = get_youtube_client(youtube_token_json)
+    try:
+        youtube = get_youtube_client(youtube_token_json)
+    except Exception as exc:
+        error = f"تعذر تجهيز اتصال YouTube: {exc}"
+        for item in links:
+            add_unpublished(
+                item["chat_id"],
+                f"🆔 رسالة الطلب: {item['message_id']}\n"
+                f"🎬 المصدر: {item['url']}\n❌ السبب: {error[:500]}",
+            )
+        send_unpublished_reports()
+        raise
     print("[LONG][AUTH] OK: اتصال YouTube جاهز", flush=True)
     print("[LONG][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)", flush=True)
     recent_markers = recent_request_markers(youtube)
@@ -314,6 +339,12 @@ def main():
                 save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
                 print("⚠️ حالة الرفع غير مؤكدة؛ لن تتم إعادة المحاولة تلقائيًا.")
             add_result(chat_id, f"❌ فشلت معالجة الرابط:\n{url}\n\nالخطأ: {err[:300]}")
+            add_unpublished(
+                chat_id,
+                f"🆔 رسالة الطلب: {message_id}\n"
+                f"🎬 المصدر: {url}\n"
+                f"❌ السبب: {err[:500]}",
+            )
 
         finally:
             for f in os.listdir(DOWNLOAD_DIR):
@@ -332,6 +363,8 @@ def main():
             + "\n\n".join(results),
         )
         print(f"[LONG][TELEGRAM][2/2] OK: تم إرسال التقرير إلى chat_id={chat_id}", flush=True)
+
+    send_unpublished_reports()
 
     # دمج احتياطي أخير مع أحدث state/ من origin/main، حتى لو كانت هناك
     # تشغيلة موازية دفعت (push) تسجيلات نجاح جديدة أثناء تنفيذ هذا التشغيل.

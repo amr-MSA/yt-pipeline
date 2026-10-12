@@ -223,6 +223,19 @@ def run_daily_batch() -> None:
     print("[LONG-SMART][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)")
     recent_markers = recent_request_markers(youtube)
     print(f"[LONG-SMART][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب")
+    unpublished_results: dict[int, list[str]] = {}
+
+    def add_unpublished(chat_id: int, message: str) -> None:
+        unpublished_results.setdefault(chat_id, []).append(message)
+
+    def send_unpublished_reports() -> None:
+        for chat_id, results in unpublished_results.items():
+            report = (
+                "⚠️ تقرير إضافي — مقاطع Long-Smart لم تُنشر أو لم يُؤكَّد نشرها:\n\n"
+                + "\n\n".join(results)
+            )
+            for start in range(0, len(report), 3800):
+                send_message(bot_token, chat_id, report[start:start + 3800])
 
     for batch_idx, batch in enumerate(active_batches, 1):
         if not publish_quota.can_publish(STATE_DIR, DAILY_LIMIT):
@@ -318,9 +331,19 @@ def run_daily_batch() -> None:
                         "سيتم إكمال النشر غدًا تلقائيًا.",
                     )
                 queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
+                add_unpublished(
+                    chat_id,
+                    f"🆔 الطابور: {queue_id} — المقطع: {clip_idx + 1}\n"
+                    f"🎬 المصدر: {batch['source_url']}\n❌ السبب: {err[:500]}",
+                )
                 break
 
             queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
+            add_unpublished(
+                chat_id,
+                f"🆔 الطابور: {queue_id} — المقطع: {clip_idx + 1}\n"
+                f"🎬 المصدر: {batch['source_url']}\n❌ السبب: {err[:500]}",
+            )
             if bot_token:
                 send_message(
                     bot_token, chat_id,
@@ -334,6 +357,7 @@ def run_daily_batch() -> None:
                 except OSError:
                     pass
 
+    send_unpublished_reports()
     print("\n🎉 انتهى التشغيل اليومي لخط long-smart.")
 
 

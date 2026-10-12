@@ -193,6 +193,19 @@ def main():
     recent_markers = recent_request_markers(youtube)
     print(f"[SHORTS][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب", flush=True)
     total = len(links)
+    unpublished_results: dict[int, list[str]] = {}
+
+    def add_unpublished(chat_id: int, message: str) -> None:
+        unpublished_results.setdefault(chat_id, []).append(message)
+
+    def send_unpublished_reports() -> None:
+        for chat_id, results in unpublished_results.items():
+            report = (
+                "⚠️ تقرير إضافي — مقاطع Shorts لم تُنشر أو لم يُؤكَّد نشرها:\n\n"
+                + "\n\n".join(results)
+            )
+            for start in range(0, len(report), 3800):
+                send_message(bot_token, chat_id, report[start:start + 3800])
 
     for idx, item in enumerate(links, 1):
         url = item["url"]
@@ -303,6 +316,11 @@ def main():
                 f"🎬 المصدر: {url}\n\n"
                 f"الخطأ: {err[:500]}",
             )
+            add_unpublished(
+                chat_id,
+                f"🆔 رسالة الطلب: {message_id}\n"
+                f"🎬 المصدر: {url}\n❌ السبب: {err[:500]}",
+            )
 
         finally:
             for f in os.listdir(DOWNLOAD_DIR):
@@ -310,6 +328,8 @@ def main():
                     os.remove(os.path.join(DOWNLOAD_DIR, f))
                 except OSError:
                     pass
+
+    send_unpublished_reports()
 
     try:
         merge_latest_state(STATE_DIR, BOT_NAME)
