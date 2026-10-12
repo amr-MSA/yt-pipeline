@@ -37,6 +37,7 @@ from gemini_utils import suggest_clips
 from telegram_utils import send_message
 from transcript_utils import fetch_transcript
 from youtube_auth import get_youtube_client
+from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(PROJECT_DIR, "state")
@@ -219,6 +220,9 @@ def run_daily_batch() -> None:
         return
 
     youtube = get_youtube_client(youtube_token_json)
+    print("[LONG-SMART][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)")
+    recent_markers = recent_request_markers(youtube)
+    print(f"[LONG-SMART][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب")
 
     for batch_idx, batch in enumerate(active_batches, 1):
         if not publish_quota.can_publish(STATE_DIR, DAILY_LIMIT):
@@ -233,6 +237,7 @@ def run_daily_batch() -> None:
             continue
 
         clip = batch["clips"][clip_idx]
+        marker = request_marker("long-smart", f"{queue_id}:{clip_idx}")
         done, total = queue_utils.batch_progress(batch)
         print(
             f"\n{'='*50}\n[طابور {batch_idx}/{len(active_batches)}] "
@@ -243,6 +248,20 @@ def run_daily_batch() -> None:
         final_path = os.path.join(DOWNLOAD_DIR, f"final_{video_id}_{clip_idx}.mp4")
 
         try:
+            youtube_existing_id = recent_markers.get(marker)
+            if youtube_existing_id:
+                video_url = f"https://youtu.be/{youtube_existing_id}"
+                print(f"⏭️ تم العثور على النشر السابق في YouTube: {video_url}")
+                queue_utils.mark_clip_published(STATE_DIR, queue_id, clip_idx, video_url)
+                publish_quota.record_publish_success(STATE_DIR)
+                recent_markers[marker] = youtube_existing_id
+                if bot_token:
+                    send_message(
+                        bot_token, chat_id,
+                        f"✅ تم تأكيد نشر مقطع {done + 1}/{total} سابقًا:\n{video_url}",
+                    )
+                continue
+
             print(f"⬇️ تحميل المقطع ({clip['start']}-{clip['end']} ثانية)...")
             _download_clip_range(batch["source_url"], clip["start"], clip["end"], raw_path, cookies_env)
 
@@ -262,12 +281,15 @@ def run_daily_batch() -> None:
                 upload_file = final_path if merged else actual_raw
 
             final_title = fixed_meta.build_final_title(clip["title"])
-            final_description = fixed_meta.build_final_description(clip["description"])
+            final_description = append_request_marker(
+                fixed_meta.build_final_description(clip["description"]), marker
+            )
 
             title_for_upload = f"{final_title} #Shorts" if clip["type"] == "shorts" else final_title
 
             print("📤 رفع على يوتيوب (public)...")
             video_youtube_id = _upload(youtube, upload_file, title_for_upload, final_description)
+            recent_markers[marker] = video_youtube_id
             video_url = f"https://youtu.be/{video_youtube_id}"
             print(f"✅ تم النشر: {video_url}")
 

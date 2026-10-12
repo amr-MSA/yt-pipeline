@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 import telegram_utils
 import queue_utils
 import long_pipeline
+import youtube_dedupe
 from cookie_utils import temporary_cookie_file
 
 
@@ -279,3 +280,36 @@ def test_long_title_prefers_original_and_falls_back_to_message_number():
     )
     assert long_pipeline.resolve_title("Video by creator", "source", message_id=202) == "ميمز العرب #202"
     assert long_pipeline.resolve_title("أي عنوان", "default", message_id=203) == "ميمز العرب #203"
+
+
+def test_youtube_request_marker_is_stable_and_survives_long_descriptions():
+    marker = youtube_dedupe.request_marker("long", "6828354904:202")
+    result = youtube_dedupe.append_request_marker("x" * 6000, marker)
+    assert marker in result
+    assert len(result) <= 4900
+
+
+def test_recent_youtube_markers_scan_latest_channel_uploads():
+    class Resource:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def list(self, **kwargs):
+            return self
+
+        def execute(self):
+            return self.payload
+
+    class Youtube:
+        def channels(self):
+            return Resource({"items": [{"contentDetails": {"relatedPlaylists": {"uploads": "PL1"}}}]})
+
+        def playlistItems(self):
+            return Resource({"items": [{"contentDetails": {"videoId": "vid123"}}]})
+
+        def videos(self):
+            return Resource({"items": [{"id": "vid123", "snippet": {"description": "x\nyt-pipeline-request:long:7:202"}}]})
+
+    assert youtube_dedupe.recent_request_markers(Youtube()) == {
+        "yt-pipeline-request:long:7:202": "vid123"
+    }

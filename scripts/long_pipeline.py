@@ -31,6 +31,7 @@ from telegram_utils import (
     send_message,
 )
 from youtube_auth import get_youtube_client
+from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(PROJECT_DIR, "state")
@@ -181,6 +182,9 @@ def main():
     print("[LONG][AUTH] START: تجهيز اتصال YouTube قبل المعالجة", flush=True)
     youtube = get_youtube_client(youtube_token_json)
     print("[LONG][AUTH] OK: اتصال YouTube جاهز", flush=True)
+    print("[LONG][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)", flush=True)
+    recent_markers = recent_request_markers(youtube)
+    print(f"[LONG][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب", flush=True)
 
     for idx, item in enumerate(links, 1):
         url = item["url"]
@@ -203,9 +207,26 @@ def main():
                 for record in uploaded.values()
             )
             existing_request = uploaded.get(key)
-            if existing_request or duplicate_upload:
+            marker = request_marker("long", key)
+            youtube_existing_id = recent_markers.get(marker)
+            if existing_request or duplicate_upload or youtube_existing_id:
                 print(f"ℹ️ الرفع مسجل مسبقًا لهذه الرسالة؛ لن يعاد رفعها: {key}")
-                add_result(chat_id, "⏭️ تم تجاوز رابط مكرر سبق نشره.")
+                if youtube_existing_id and not existing_request:
+                    video_url = f"https://youtu.be/{youtube_existing_id}"
+                    uploaded[key] = {
+                        "status": "succeeded",
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "video_id": youtube_existing_id,
+                        "url": url,
+                        "published_at": int(time.time()),
+                        "dedupe_source": "youtube_recent_10",
+                    }
+                    save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+                    record_published_url(STATE_DIR, BOT_NAME, url, youtube_existing_id)
+                    add_result(chat_id, f"✅ تم تأكيد النشر السابق\n📺 YouTube: {video_url}")
+                else:
+                    add_result(chat_id, "⏭️ تم تجاوز رابط مكرر سبق نشره.")
                 acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
                 if delete_message(bot_token, chat_id, message_id):
                     if existing_request is not None:
@@ -224,6 +245,7 @@ def main():
                 item.get("title_override"),
                 message_id,
             )
+            desc = append_request_marker(desc, marker)
 
             actual_file = raw_path
             if not os.path.exists(actual_file):
@@ -261,6 +283,7 @@ def main():
             }
             save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
             record_published_url(STATE_DIR, BOT_NAME, url, video_id)
+            recent_markers[marker] = video_id
             published_urls = load_published_urls(STATE_DIR, BOT_NAME)
             acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
 

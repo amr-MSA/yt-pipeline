@@ -19,6 +19,7 @@ from telegram_utils import (
     delete_message,
 )
 from youtube_auth import get_youtube_client
+from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
 import long_smart_pipeline
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -188,6 +189,9 @@ def main():
         return
 
     youtube = get_youtube_client(youtube_token_json)
+    print("[SHORTS][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)", flush=True)
+    recent_markers = recent_request_markers(youtube)
+    print(f"[SHORTS][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب", flush=True)
     total = len(links)
 
     for idx, item in enumerate(links, 1):
@@ -195,6 +199,7 @@ def main():
         chat_id = item["chat_id"]
         message_id = item["message_id"]
         key = message_key(item)
+        marker = request_marker("shorts", key)
         raw_path = os.path.join(DOWNLOAD_DIR, f"raw_{idx}.mp4")
         final_path = os.path.join(DOWNLOAD_DIR, f"final_{idx}.mp4")
 
@@ -208,9 +213,28 @@ def main():
         save_message_ledger(STATE_DIR, BOT_NAME, ledger)
 
         try:
+            youtube_existing_id = recent_markers.get(marker)
+            if youtube_existing_id:
+                video_url = f"https://youtu.be/{youtube_existing_id}"
+                ledger[key] = {
+                    "status": "succeeded",
+                    "stage": "uploaded",
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "source_url": url,
+                    "video_id": youtube_existing_id,
+                    "video_url": video_url,
+                    "dedupe_source": "youtube_recent_10",
+                }
+                save_message_ledger(STATE_DIR, BOT_NAME, ledger)
+                print(f"⏭️ تم العثور على النشر السابق في YouTube: {video_url}")
+                if delete_message(bot_token, chat_id, message_id):
+                    print(f"🗑️ حُذفت رسالة الرابط المؤكدة سابقًا: {message_id}")
+                continue
+
             info = download_clip(url, raw_path)
             title = info.get("title", "شورت جديد")
-            desc = info.get("description", "") or ""
+            desc = append_request_marker(info.get("description", "") or "", marker)
 
             actual_raw = raw_path
             if not os.path.exists(actual_raw):
@@ -230,6 +254,7 @@ def main():
             video_id = upload_video(
                 youtube, upload_file, f"{title} #Shorts", desc
             )
+            recent_markers[marker] = video_id
             video_url = f"https://youtu.be/{video_id}"
 
             # ثبّت نجاح الرفع قبل أي عملية Telegram.
