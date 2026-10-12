@@ -21,10 +21,11 @@ from telegram_utils import (
 from youtube_auth import get_youtube_client
 import long_smart_pipeline
 
-STATE_DIR = "state"
-DOWNLOAD_DIR = "downloads_short"
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATE_DIR = os.path.join(PROJECT_DIR, "state")
+DOWNLOAD_DIR = os.path.join(PROJECT_DIR, "downloads_short")
 BOT_NAME = "shorts"
-TEMPLATE_PATH = "assets/template.png"
+TEMPLATE_PATH = os.path.join(PROJECT_DIR, "assets", "template.png")
 CLIP_START = 0
 CLIP_END = 60
 TEMPLATE_NATIVE_W, TEMPLATE_NATIVE_H = 941, 1672

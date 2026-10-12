@@ -7,6 +7,7 @@
 5. يحتفظ بنجاح الرفع إذا تعذر الحذف حتى لا يعاد رفع الطلب.
 """
 import os
+import re
 import sys
 import time
 import traceback
@@ -31,10 +32,12 @@ from telegram_utils import (
 )
 from youtube_auth import get_youtube_client
 
-STATE_DIR = "state"
-DOWNLOAD_DIR = "downloads_long"
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATE_DIR = os.path.join(PROJECT_DIR, "state")
+DOWNLOAD_DIR = os.path.join(PROJECT_DIR, "downloads_long")
 BOT_NAME = "long"
 DEFAULT_TITLE = "مقطع اليوم"
+TITLE_FALLBACK_PREFIX = "ميمز العرب #"
 YOUTUBE_TITLE_MAX = 100
 DEFAULT_DESCRIPTION = """أستغفر الله العظيم واتوب إليه 🤲
 
@@ -96,17 +99,28 @@ def upload_video(youtube, file_path: str, title: str, description: str) -> str:
     return video_id
 
 
-def resolve_title(source_title: str | None, title_mode: str, title_override: str | None = None) -> str:
-    """يستخدم عنوان المصدر، ويعود إلى «مقطع اليوم» إذا كان مفقودًا أو طويلًا."""
+def resolve_title(
+    source_title: str | None,
+    title_mode: str,
+    title_override: str | None = None,
+    message_id: int | str | None = None,
+) -> str:
+    """يستخدم عنوان المصدر، أو fallback ثابتًا يتضمن رقم رسالة Telegram."""
     if title_mode == "custom" and title_override:
         custom = title_override.strip()
-        return custom[:YOUTUBE_TITLE_MAX] if custom else DEFAULT_TITLE
+        return custom[:YOUTUBE_TITLE_MAX] if custom else _fallback_title(message_id)
     if title_mode == "default":
-        return DEFAULT_TITLE
+        return _fallback_title(message_id)
     title = (source_title or "").strip()
-    if title and len(title) <= YOUTUBE_TITLE_MAX:
+    generic_source_title = re.match(r"^video\s+by\b", title, re.IGNORECASE)
+    if title and not generic_source_title and len(title) <= YOUTUBE_TITLE_MAX:
         return title
-    return DEFAULT_TITLE
+    return _fallback_title(message_id)
+
+
+def _fallback_title(message_id: int | str | None) -> str:
+    suffix = str(message_id).strip() if message_id is not None else "0"
+    return f"{TITLE_FALLBACK_PREFIX}{suffix}"[:YOUTUBE_TITLE_MAX]
 
 
 def reconcile_uploaded_messages(bot_token: str, uploaded: dict) -> dict:
@@ -204,7 +218,12 @@ def main():
             source_title = info.get("title") or ""
             desc = info.get("description", "") or DEFAULT_DESCRIPTION
             title_mode = item.get("title_mode", "default")
-            title = resolve_title(source_title, title_mode, item.get("title_override"))
+            title = resolve_title(
+                source_title,
+                title_mode,
+                item.get("title_override"),
+                message_id,
+            )
 
             actual_file = raw_path
             if not os.path.exists(actual_file):

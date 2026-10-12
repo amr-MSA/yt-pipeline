@@ -40,13 +40,29 @@ jobs:
         run: python long_smart_pipeline.py
 
       - name: Commit updated state (queues + quota)
+        if: always()
         run: |
+          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add state/ || true
+          git add -A state/ || true
           if ! git diff --cached --quiet; then
             git commit -m "chore: update long-smart queue/quota state [skip ci]"
-            git push
+            for i in 1 2 3 4 5; do
+              if git push; then
+                echo "✅ تم رفع تحديث الحالة."
+                exit 0
+              fi
+              echo "⚠️ فشل push (محاولة $i)، جاري إعادة الأساس والمحاولة..."
+              git fetch origin main
+              if ! git rebase -X ours origin/main; then
+                git rebase --abort || true
+                git merge -X ours origin/main -m "merge long-smart state (keep local)"
+              fi
+              sleep 3
+            done
+            echo "❌ فشل رفع تحديث حالة long-smart بعد عدة محاولات." >&2
+            exit 1
           else
             echo "لا تغييرات في الحالة."
           fi

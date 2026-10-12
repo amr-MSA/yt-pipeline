@@ -38,12 +38,13 @@ from telegram_utils import send_message
 from transcript_utils import fetch_transcript
 from youtube_auth import get_youtube_client
 
-STATE_DIR = "state"
-DOWNLOAD_DIR = "downloads_long_smart"
-WORK_DIR = "work_long_smart"
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATE_DIR = os.path.join(PROJECT_DIR, "state")
+DOWNLOAD_DIR = os.path.join(PROJECT_DIR, "downloads_long_smart")
+WORK_DIR = os.path.join(PROJECT_DIR, "work_long_smart")
 DAILY_LIMIT = 8  # حد نشر يومي منفصل خاص بخط long-smart فقط
 
-TEMPLATE_PATH = "assets/template.png"
+TEMPLATE_PATH = os.path.join(PROJECT_DIR, "assets", "template.png")
 TEMPLATE_NATIVE_W, TEMPLATE_NATIVE_H = 941, 1672
 TEMPLATE_BOX_X, TEMPLATE_BOX_Y = 95, 630
 TEMPLATE_BOX_W, TEMPLATE_BOX_H = 750, 435

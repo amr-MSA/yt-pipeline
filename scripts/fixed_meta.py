@@ -7,8 +7,9 @@
 """
 import os
 
-FIXED_TITLE_PATH = "assets/fixed_title.txt"
-FIXED_DESCRIPTION_PATH = "assets/fixed_description.txt"
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FIXED_TITLE_PATH = os.path.join(PROJECT_DIR, "assets", "fixed_title.txt")
+FIXED_DESCRIPTION_PATH = os.path.join(PROJECT_DIR, "assets", "fixed_description.txt")
 
 YOUTUBE_TITLE_MAX = 100
 YOUTUBE_DESCRIPTION_MAX = 4900
