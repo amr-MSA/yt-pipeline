@@ -4,12 +4,26 @@ from __future__ import annotations
 import re
 
 REQUEST_MARKER_PREFIX = "yt-pipeline-request:"
-MARKER_RE = re.compile(r"yt-pipeline-request:[^\s]+")
+# الصيغة الجديدة قصيرة وقابلة للقراءة: #<bot>-<chat_id>-<message_id>.
+# Long = 1، وبوت Shorts (ويشمل long-smart الذي يعمل من خلاله) = 2.
+BOT_CODES = {"long": "1", "shorts": "2", "long-smart": "2"}
+CODE_MARKER_RE = re.compile(r"(?<![\w#])#[12]-[^\s]+")
+# نقرأ الصيغة القديمة حتى تبقى المقاطع المنشورة قبل هذا التغيير قابلة للاكتشاف.
+LEGACY_MARKER_RE = re.compile(r"yt-pipeline-request:[^\s]+")
 
 
 def request_marker(pipeline: str, request_key: str) -> str:
-    """Return a stable marker shared by retries of the same Telegram request."""
-    return f"{REQUEST_MARKER_PREFIX}{pipeline}:{request_key}"
+    """Return a stable # marker shared by retries of the same request.
+
+    request_key is normally ``chat_id:message_id``. The first digit after #
+    identifies the bot, while the rest preserves the Telegram request identity.
+    """
+    try:
+        bot_code = BOT_CODES[pipeline]
+    except KeyError as exc:
+        raise ValueError(f"Unknown pipeline for request marker: {pipeline}") from exc
+    safe_key = str(request_key).replace(":", "-")
+    return f"#{bot_code}-{safe_key}"
 
 
 def recent_request_markers(youtube, limit: int = 10) -> dict[str, str]:
@@ -52,7 +66,9 @@ def recent_request_markers(youtube, limit: int = 10) -> dict[str, str]:
         video_id = item.get("id")
         if not video_id:
             continue
-        for marker in MARKER_RE.findall(description):
+        for marker in CODE_MARKER_RE.findall(description):
+            markers[marker] = video_id
+        for marker in LEGACY_MARKER_RE.findall(description):
             markers[marker] = video_id
     return markers
 

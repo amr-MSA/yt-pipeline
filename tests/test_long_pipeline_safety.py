@@ -284,6 +284,9 @@ def test_long_title_prefers_original_and_falls_back_to_message_number():
 
 def test_youtube_request_marker_is_stable_and_survives_long_descriptions():
     marker = youtube_dedupe.request_marker("long", "6828354904:202")
+    assert marker == "#1-6828354904-202"
+    assert youtube_dedupe.request_marker("shorts", "6828354904:202") == "#2-6828354904-202"
+    assert youtube_dedupe.request_marker("long-smart", "6828354904:202") == "#2-6828354904-202"
     result = youtube_dedupe.append_request_marker("x" * 6000, marker)
     assert marker in result
     assert len(result) <= 4900
@@ -308,7 +311,33 @@ def test_recent_youtube_markers_scan_latest_channel_uploads():
             return Resource({"items": [{"contentDetails": {"videoId": "vid123"}}]})
 
         def videos(self):
-            return Resource({"items": [{"id": "vid123", "snippet": {"description": "x\nyt-pipeline-request:long:7:202"}}]})
+            return Resource({"items": [{"id": "vid123", "snippet": {"description": "x\n#1-7-202"}}]})
+
+    assert youtube_dedupe.recent_request_markers(Youtube()) == {
+        "#1-7-202": "vid123"
+    }
+
+
+def test_recent_youtube_markers_keep_legacy_format_readable():
+    class Resource:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def list(self, **kwargs):
+            return self
+
+        def execute(self):
+            return self.payload
+
+    class Youtube:
+        def channels(self):
+            return Resource({"items": [{"contentDetails": {"relatedPlaylists": {"uploads": "PL1"}}}]})
+
+        def playlistItems(self):
+            return Resource({"items": [{"contentDetails": {"videoId": "vid123"}}]})
+
+        def videos(self):
+            return Resource({"items": [{"id": "vid123", "snippet": {"description": "yt-pipeline-request:long:7:202"}}]})
 
     assert youtube_dedupe.recent_request_markers(Youtube()) == {
         "yt-pipeline-request:long:7:202": "vid123"
