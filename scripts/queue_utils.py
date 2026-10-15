@@ -47,8 +47,10 @@ def save_new_batch(
     chat_id: int,
     clips: list[dict],
     source_handle: str = "",
+    part_index: int = 0,
+    part_count: int = 1,
 ) -> None:
-    """يحفظ دفعة جديدة من 8 مقاطع مرتبطة برسالة Telegram محددة."""
+    """يحفظ دفعة من 8 مقاطع مرتبطة برسالة Telegram وجزء ترانسكريبت محدد."""
     data = {
         "video_id": video_id,
         "queue_id": queue_id,
@@ -57,6 +59,8 @@ def save_new_batch(
         "source_title": source_title,
         "source_handle": source_handle,
         "chat_id": chat_id,
+        "part_index": part_index,
+        "part_count": part_count,
         "clips": [
             {
                 **clip,
@@ -66,13 +70,17 @@ def save_new_batch(
             for clip in clips
         ],
     }
-    with open(_queue_file(state_dir, queue_id), "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _save_batch(_queue_file(state_dir, queue_id), data)
 
 
 def _load_batch(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_batch(path: str) -> dict:
+    """تحميل Queue محفوظ لإعادة قراءة حالته بعد كل نشر."""
+    return _load_batch(path)
 
 
 def _save_batch(path: str, data: dict) -> None:
@@ -85,12 +93,19 @@ def _save_batch(path: str, data: dict) -> None:
 def list_active_batches(state_dir: str) -> list[dict]:
     """يرجع الدفعات التي فيها مقطع pending أو failed_retryable."""
     active = []
-    for path in sorted(glob.glob(os.path.join(_queue_dir(state_dir), "*.json"))):
+    for path in glob.glob(os.path.join(_queue_dir(state_dir), "*.json")):
         data = _load_batch(path)
         if any(c["status"] in {"pending", "failed_retryable", "upload_unknown"} for c in data["clips"]):
             data["_path"] = path
             active.append(data)
-    return active
+    return sorted(
+        active,
+        key=lambda item: (
+            item.get("request_key", ""),
+            int(item.get("part_index", 0)),
+            item.get("queue_id", ""),
+        ),
+    )
 
 
 def get_next_pending_index(batch: dict) -> int | None:

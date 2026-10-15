@@ -35,7 +35,7 @@ import publish_quota
 import queue_utils
 from gemini_utils import suggest_clips
 from telegram_utils import send_message
-from transcript_utils import fetch_transcript
+from transcript_utils import fetch_transcript, split_segments
 from youtube_auth import get_youtube_client
 from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
 
@@ -44,6 +44,7 @@ STATE_DIR = os.path.join(PROJECT_DIR, "state")
 DOWNLOAD_DIR = os.path.join(PROJECT_DIR, "downloads_long_smart")
 WORK_DIR = os.path.join(PROJECT_DIR, "work_long_smart")
 DAILY_LIMIT = 8  # حد نشر يومي منفصل خاص بخط long-smart فقط
+TRANSCRIPT_CHUNK_CHARS = 45000
 
 TEMPLATE_PATH = os.path.join(PROJECT_DIR, "assets", "template.png")
 TEMPLATE_NATIVE_W, TEMPLATE_NATIVE_H = 941, 1672
@@ -93,21 +94,36 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
             video_id = transcript["video_id"]
             source_handle = fixed_meta.source_handle_from_info(transcript.get("source_info"))
 
-            print(f"✅ تم سحب {len(transcript['segments'])} جزء نصي. جاري إرسالها لجيمناي...")
-            clips = suggest_clips(gemini_api_key, transcript["title"], transcript["segments"])
-            print(f"✅ جيمناي اقترح {len(clips)} مقطع.")
-
-            queue_utils.save_new_batch(
-                state_dir=STATE_DIR,
-                queue_id=queue_id,
-                request_key=key,
-                video_id=video_id,
-                source_url=url,
-                source_title=transcript["title"],
-                source_handle=source_handle,
-                chat_id=chat_id,
-                clips=clips,
+            print(f"✅ تم سحب {len(transcript['segments'])} جزء نصي. جاري تقسيمه وإرساله لجيمناي...")
+            transcript_chunks = split_segments(
+                transcript["segments"], max_chars=TRANSCRIPT_CHUNK_CHARS
             )
+            total_clips = 0
+            for part_index, chunk in enumerate(transcript_chunks):
+                part_queue_id = queue_utils.queue_id_for_request(f"{key}:part:{part_index}")
+                if queue_utils.queue_exists(STATE_DIR, part_queue_id):
+                    print(f"⏭️ الجزء {part_index + 1} محفوظ مسبقًا، لن يعاد تحليله.")
+                    total_clips += 8
+                    continue
+                clips = suggest_clips(gemini_api_key, transcript["title"], chunk)
+                print(
+                    f"✅ جيمناي اقترح {len(clips)} مقطعًا للجزء "
+                    f"{part_index + 1}/{len(transcript_chunks)}."
+                )
+                queue_utils.save_new_batch(
+                    state_dir=STATE_DIR,
+                    queue_id=part_queue_id,
+                    request_key=key,
+                    video_id=video_id,
+                    source_url=url,
+                    source_title=transcript["title"],
+                    source_handle=source_handle,
+                    chat_id=chat_id,
+                    clips=clips,
+                    part_index=part_index,
+                    part_count=len(transcript_chunks),
+                )
+                total_clips += len(clips)
             results[key] = "succeeded"
 
             send_message(
@@ -116,10 +132,8 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
                 f"🆔 رسالة الطلب: {cmd['message_id']}\n"
                 f"🎬 المصدر: {url}\n"
                 f"📝 العنوان: {transcript['title']}\n"
-                f"تم حفظ {len(clips)} مقاطع مقترحة "
-                f"في طابور النشر.\n\n"
-                f"📌 سيُنشر مقطع واحد يوميًا من هذا الفيديو تلقائيًا (ضمن الحد اليومي)، "
-                f"حتى تنتهي كل المقاطع.\n"
+                f"تم حفظ {total_clips} مقطعًا مقترحًا في {len(transcript_chunks)} ملف/ملفات Queue.\n\n"
+                f"📌 سيُنشر ملف Queue واحد كاملًا كل يوم بالترتيب، حتى تنتهي كل المقاطع.\n"
                 f"ℹ️ إرسال نفس الرابط في رسالة جديدة سيُعامل كطلب جديد مستقل.",
             )
 
@@ -224,7 +238,12 @@ def run_daily_batch() -> None:
         print("📭 لا توجد طوابير long-smart نشطة اليوم. إنهاء.")
         return
 
-    print(f"📦 عدد الطوابير النشطة: {len(active_batches)}")
+    # التزم بملف واحد في اليوم: لا ننتقل إلى Queue التالي حتى تنتهي كل
+    # مقاطع الملف الحالي. نكرر نفس المرجع بعدد المقاطع ونقرأ حالته من القرص
+    # في بداية كل دورة، لذلك يبقى غير المنشور لليوم التالي عند توقف quota.
+    first_batch = active_batches[0]
+    active_batches = [first_batch] * len(first_batch["clips"])
+    print(f"📦 عدد ملفات Queue النشطة: {len(queue_utils.list_active_batches(STATE_DIR))}")
 
     if not publish_quota.can_publish(STATE_DIR, DAILY_LIMIT):
         print(f"🚫 تم الوصول للحد اليومي لخط long-smart ({DAILY_LIMIT}). لا نشر اليوم.")
@@ -253,6 +272,7 @@ def run_daily_batch() -> None:
                 send_message(bot_token, chat_id, report[start:start + 3800])
 
     for batch_idx, batch in enumerate(active_batches, 1):
+        batch = queue_utils.load_batch(batch["_path"])
         if not publish_quota.can_publish(STATE_DIR, DAILY_LIMIT):
             print("🚫 تم الوصول للحد اليومي أثناء التشغيل. إيقاف باقي الدفعات.")
             break
@@ -268,7 +288,8 @@ def run_daily_batch() -> None:
         marker = request_marker("long-smart", f"{queue_id}:{clip_idx}")
         done, total = queue_utils.batch_progress(batch)
         print(
-            f"\n{'='*50}\n[طابور {batch_idx}/{len(active_batches)}] "
+            f"\n{'='*50}\n[ملف Queue {batch.get('part_index', 0) + 1}/"
+            f"{batch.get('part_count', 1)} — دورة {batch_idx}/{len(active_batches)}] "
             f"فيديو {video_id} — مقطع {done + 1}/{total} (نوع: {clip['type']})"
         )
 
@@ -365,10 +386,10 @@ def run_daily_batch() -> None:
                         "⚠️ تم الوصول لحد نشر يوتيوب اليومي (رصدناه من رسالة الخطأ). "
                         "سيتم إكمال النشر غدًا تلقائيًا.",
                     )
-                if queue_utils.get_clip_status(STATE_DIR, queue_id, clip_idx) == "uploading":
-                    queue_utils.mark_clip_upload_unknown(STATE_DIR, queue_id, clip_idx, err)
-                else:
-                    queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
+                # خطأ quota معروف يعني أن هذا الطلب لم يُقبل للنشر عادةً؛
+                # أعد المقطع pending عمليًا لليوم التالي، ولا تجعله
+                # upload_unknown الذي قد يوقف الملف بلا داعٍ.
+                queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
                 add_unpublished(
                     chat_id,
                     f"🆔 الطابور: {queue_id} — المقطع: {clip_idx + 1}\n"

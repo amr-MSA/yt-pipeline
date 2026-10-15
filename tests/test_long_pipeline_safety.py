@@ -11,6 +11,7 @@ import queue_utils
 import long_pipeline
 import youtube_dedupe
 import fixed_meta
+from transcript_utils import split_segments
 from cookie_utils import temporary_cookie_file
 
 
@@ -226,6 +227,32 @@ def test_long_smart_creates_separate_queues_for_same_url_messages():
             "video-id", "https://youtu.be/same", "title", 7, clips,
         )
         assert len(queue_utils.list_active_batches(tmp)) == 2
+
+
+def test_long_smart_splits_long_transcript_and_preserves_part_order():
+    segments = [
+        {"start": i * 10, "end": i * 10 + 10, "text": "x" * 30}
+        for i in range(20)
+    ]
+    chunks = split_segments(segments, max_chars=220)
+    assert len(chunks) > 1
+    with tempfile.TemporaryDirectory() as tmp:
+        for index, _chunk in enumerate(chunks):
+            queue_utils.save_new_batch(
+                tmp,
+                queue_utils.queue_id_for_request(f"7:1:part:{index}"),
+                "7:1",
+                "video-id",
+                "https://youtu.be/demo",
+                "title",
+                7,
+                [{"type": "long", "start": 0, "end": 1, "title": "t", "description": "d"}],
+                part_index=index,
+                part_count=len(chunks),
+            )
+        assert [item["part_index"] for item in queue_utils.list_active_batches(tmp)] == list(
+            range(len(chunks))
+        )
 
 
 def test_upload_success_state_survives_delete_failure():

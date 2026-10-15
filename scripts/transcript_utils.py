@@ -44,6 +44,30 @@ def _parse_vtt(path: str) -> list[dict]:
     return segments
 
 
+def split_segments(segments: list[dict], max_chars: int = 45000) -> list[list[dict]]:
+    """يقسم الترانسكريبت إلى أجزاء مستقلة دون قطع segment زمنيًا.
+
+    التقسيم تقريبي حسب عدد الأحرف حتى لا نرسل ترانسكريبتًا ضخمًا إلى Gemini؛
+    وقد تضيع فكرة تعبر حد الجزء، وهذا مقبول لأن كل جزء يُحلل مستقلًا.
+    """
+    if not segments:
+        return []
+    chunks: list[list[dict]] = []
+    current: list[dict] = []
+    current_chars = 0
+    for segment in segments:
+        segment_chars = len(segment.get("text", "")) + 32
+        if current and current_chars + segment_chars > max_chars:
+            chunks.append(current)
+            current = []
+            current_chars = 0
+        current.append(segment)
+        current_chars += segment_chars
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def fetch_transcript(url: str, work_dir: str, cookies_env: str | None = None) -> dict:
     """
     يسحب الترانسكريبت (نص + توقيت) لفيديو يوتيوب.
