@@ -47,9 +47,9 @@ DAILY_LIMIT = 8  # حد نشر يومي منفصل خاص بخط long-smart فق
 TRANSCRIPT_CHUNK_CHARS = 45000
 
 TEMPLATE_PATH = os.path.join(PROJECT_DIR, "assets", "template.png")
-TEMPLATE_NATIVE_W, TEMPLATE_NATIVE_H = 941, 1672
-TEMPLATE_BOX_X, TEMPLATE_BOX_Y = 95, 630
-TEMPLATE_BOX_W, TEMPLATE_BOX_H = 750, 435
+TEMPLATE_NATIVE_W, TEMPLATE_NATIVE_H = 720, 1280  # أبعاد assets/template.png
+TEMPLATE_BOX_X, TEMPLATE_BOX_Y = 48, 202  # بداية فتحة الفيديو داخل الإطار
+TEMPLATE_BOX_W, TEMPLATE_BOX_H = 624, 870  # أبعاد الفتحة الداخلية
 SHORTS_OUTPUT_W, SHORTS_OUTPUT_H = 1080, 1920
 
 
