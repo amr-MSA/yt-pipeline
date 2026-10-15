@@ -42,6 +42,45 @@ def test_fetch_all_new_messages_accepts_non_youtube_url():
     assert long_commands == []
 
 
+def test_inline_quoted_title_before_url_is_used_as_custom_title():
+    assert telegram_utils.extract_inline_title(
+        '"ووو"https://www.instagram.com/reel/DedwjxON0HB/?x=1'
+    ) == "ووو"
+    assert telegram_utils.extract_inline_title(
+        '“عنوان تجريبي” https://youtu.be/demo'
+    ) == "عنوان تجريبي"
+
+    update = {
+        "update_id": 1,
+        "message": {
+            "message_id": 2,
+            "chat": {"id": 7},
+            "text": '"ووو"https://www.instagram.com/reel/DedwjxON0HB/?x=1',
+        },
+    }
+    with patch.object(telegram_utils, "_fetch_updates", return_value=[update]):
+        links, _ = telegram_utils.fetch_all_new_messages("token", "/tmp", "shorts")
+    assert links[0]["title_mode"] == "custom"
+    assert links[0]["title_override"] == "ووو"
+
+
+def test_inline_title_is_applied_to_long_bot_links():
+    updates = [
+        {
+            "update_id": 1,
+            "message": {
+                "message_id": 2,
+                "chat": {"id": 7},
+                "text": '"عنوان اللونق" https://example.com/video',
+            },
+        }
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        links = telegram_utils.fetch_new_links("token", "/tmp", "long")
+    assert links[0]["title_mode"] == "custom"
+    assert links[0]["title_override"] == "عنوان اللونق"
+
+
 def test_fetch_all_new_messages_accepts_non_youtube_long_command():
     update = {
         "update_id": 1,

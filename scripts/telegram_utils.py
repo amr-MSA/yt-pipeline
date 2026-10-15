@@ -24,6 +24,10 @@ DEFAULT_TITLE_COMMAND_RE = re.compile(r"^/d(?:@\w+)?$", re.IGNORECASE)
 CUSTOM_TITLE_COMMAND_RE = re.compile(
     r"^/t(?:@\w+)?\s+[\"“](.+?)[\"”]$", re.IGNORECASE | re.DOTALL
 )
+INLINE_TITLE_PREFIX_RE = re.compile(
+    r'^\s*(?:"(?P<ascii>[^"\r\n]+)"|“(?P<arabic>[^”\r\n]+)”)[ \t]*(?=https?://)',
+    re.IGNORECASE,
+)
 PIPELINE_REPORT_PREFIXES = (
     "📊 تقرير الدفعة",
     "✅ تم نشر الفيديو بنجاح:",
@@ -49,6 +53,15 @@ def extract_urls(text: str) -> list[str]:
     """يستخرج روابط HTTP(S) من أي منصة، مع إزالة punctuation المحيط."""
     urls = (_clean_url(match.group(0)) for match in GENERIC_URL_RE.finditer(text))
     return [url for url in urls if _is_safe_url(url)]
+
+
+def extract_inline_title(text: str) -> str | None:
+    """يستخرج عنوانًا بين التنصيص إذا جاء في بداية الرسالة قبل الرابط."""
+    match = INLINE_TITLE_PREFIX_RE.match(text or "")
+    if not match:
+        return None
+    title = (match.group("ascii") or match.group("arabic") or "").strip()
+    return title or None
 
 
 def is_boundary_marker(text: str) -> bool:
@@ -278,7 +291,8 @@ def fetch_new_links(
             continue
         if LONG_COMMAND_RE.search(text):
             continue
-        for u in extract_urls(text):
+        inline_title = extract_inline_title(text)
+        for index, u in enumerate(extract_urls(text)):
             canonical = canonicalize_url(u)
             item = {
                 "url": u,
@@ -289,6 +303,9 @@ def fetch_new_links(
                 "text": text.strip(),
                 "title_mode": "source",
             }
+            if index == 0 and inline_title:
+                item["title_mode"] = "custom"
+                item["title_override"] = inline_title
             # التكرار الذكي: نفس الرابط بصيغة مختلفة أو مع tracking لا ينشئ طلبًا جديدًا.
             if canonical not in inbox and not any(_inbox_key(x) == canonical for x in new_links):
                 new_links.append(item)
@@ -340,13 +357,16 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
                 }
             )
             continue
-        for u in extract_urls(text):
+        inline_title = extract_inline_title(text)
+        for index, u in enumerate(extract_urls(text)):
             links.append(
                 {
                     "url": u,
                     "chat_id": msg["chat"]["id"],
                     "message_id": msg["message_id"],
                     "text": text.strip(),
+                    "title_mode": "custom" if index == 0 and inline_title else "source",
+                    **({"title_override": inline_title} if index == 0 and inline_title else {}),
                 }
             )
 
