@@ -84,6 +84,7 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
             print("📝 سحب الترانسكريبت من يوتيوب...")
             transcript = fetch_transcript(url, os.path.join(WORK_DIR, f"t{idx}"), cookies_env)
             video_id = transcript["video_id"]
+            source_handle = fixed_meta.source_handle_from_info(transcript.get("source_info"))
 
             print(f"✅ تم سحب {len(transcript['segments'])} جزء نصي. جاري إرسالها لجيمناي...")
             clips = suggest_clips(gemini_api_key, transcript["title"], transcript["segments"])
@@ -96,6 +97,7 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
                 video_id=video_id,
                 source_url=url,
                 source_title=transcript["title"],
+                source_handle=source_handle,
                 chat_id=chat_id,
                 clips=clips,
             )
@@ -295,7 +297,11 @@ def run_daily_batch() -> None:
 
             final_title = fixed_meta.build_final_title(clip["title"])
             final_description = append_request_marker(
-                fixed_meta.build_final_description(clip["description"]), marker
+                fixed_meta.build_final_description(
+                    clip["description"],
+                    source_handle=batch.get("source_handle"),
+                    source_url=batch.get("source_url"),
+                ), marker
             )
 
             title_for_upload = f"{final_title} #Shorts" if clip["type"] == "shorts" else final_title

@@ -44,6 +44,7 @@ def save_new_batch(
     source_title: str,
     chat_id: int,
     clips: list[dict],
+    source_handle: str = "",
 ) -> None:
     """يحفظ دفعة جديدة من 8 مقاطع مرتبطة برسالة Telegram محددة."""
     data = {
@@ -52,6 +53,7 @@ def save_new_batch(
         "request_key": request_key,
         "source_url": source_url,
         "source_title": source_title,
+        "source_handle": source_handle,
         "chat_id": chat_id,
         "clips": [
             {

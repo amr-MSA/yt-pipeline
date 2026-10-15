@@ -10,6 +10,7 @@ import telegram_utils
 import queue_utils
 import long_pipeline
 import youtube_dedupe
+import fixed_meta
 from cookie_utils import temporary_cookie_file
 
 
@@ -280,6 +281,20 @@ def test_long_title_prefers_original_and_falls_back_to_message_number():
     )
     assert long_pipeline.resolve_title("Video by creator", "source", message_id=202) == "ميمز العرب #202"
     assert long_pipeline.resolve_title("أي عنوان", "default", message_id=203) == "ميمز العرب #203"
+
+
+def test_description_attributes_source_handle_and_keeps_rights_notice():
+    info = {"uploader_id": "@original_creator"}
+    handle = fixed_meta.source_handle_from_info(info)
+    description = fixed_meta.build_final_description("وصف المقطع", handle, "https://youtu.be/demo")
+    assert "@original_creator" in description
+    assert "الحقوق محفوظة" in description
+
+
+def test_description_falls_back_to_source_url_without_handle():
+    description = fixed_meta.build_final_description("", "", "https://example.com/source")
+    assert "https://example.com/source" in description
+    assert "الحقوق محفوظة" in description
 
 
 def test_youtube_request_marker_is_stable_and_survives_long_descriptions():

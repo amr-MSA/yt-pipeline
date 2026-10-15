@@ -47,7 +47,7 @@ def _parse_vtt(path: str) -> list[dict]:
 def fetch_transcript(url: str, work_dir: str, cookies_env: str | None = None) -> dict:
     """
     يسحب الترانسكريبت (نص + توقيت) لفيديو يوتيوب.
-    يرجع: {"video_id":..., "title":..., "duration":..., "segments":[{start,end,text}, ...]}
+    يرجع بيانات الفيديو، بما فيها handle القناة لاستخدامه في إسناد المصدر.
     """
     os.makedirs(work_dir, exist_ok=True)
     sub_out = os.path.join(work_dir, "sub")
@@ -87,5 +87,6 @@ def fetch_transcript(url: str, work_dir: str, cookies_env: str | None = None) ->
         "video_id": video_id,
         "title": title,
         "duration": duration,
+        "source_info": info,
         "segments": segments,
     }

@@ -32,6 +32,7 @@ from telegram_utils import (
 )
 from youtube_auth import get_youtube_client
 from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
+import fixed_meta
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(PROJECT_DIR, "state")
@@ -263,6 +264,11 @@ def main():
             info = download_video(url, raw_path)
             source_title = info.get("title") or ""
             desc = info.get("description", "") or DEFAULT_DESCRIPTION
+            desc = fixed_meta.build_final_description(
+                desc,
+                source_handle=fixed_meta.source_handle_from_info(info),
+                source_url=url,
+            )
             title_mode = item.get("title_mode", "default")
             title = resolve_title(
                 source_title,

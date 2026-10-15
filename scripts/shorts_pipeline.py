@@ -21,6 +21,7 @@ from telegram_utils import (
 from youtube_auth import get_youtube_client
 from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
 import long_smart_pipeline
+import fixed_meta
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(PROJECT_DIR, "state")
@@ -247,7 +248,12 @@ def main():
 
             info = download_clip(url, raw_path)
             title = info.get("title", "شورت جديد")
-            desc = append_request_marker(info.get("description", "") or "", marker)
+            desc = fixed_meta.build_final_description(
+                info.get("description", "") or "",
+                source_handle=fixed_meta.source_handle_from_info(info),
+                source_url=url,
+            )
+            desc = append_request_marker(desc, marker)
 
             actual_raw = raw_path
             if not os.path.exists(actual_raw):
