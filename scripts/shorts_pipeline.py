@@ -17,6 +17,7 @@ from telegram_utils import (
     send_batch_summary,
     send_message,
     delete_message,
+    acknowledge_smart_long_command,
 )
 from youtube_auth import get_youtube_client
 from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
@@ -99,8 +100,28 @@ def upload_video(youtube, file_path: str, title: str, description: str) -> str:
 
 
 def process_long_commands(bot_token, long_commands, ledger):
+    # أعد محاولة حذف رسائل أوامر Smart Long التي نجح تحليلها سابقًا لكن
+    # تعذر حذف أصلها من Telegram.
+    for key, record in ledger.items():
+        if record.get("pipeline") != "long-smart" or not record.get("delete_pending"):
+            continue
+        if delete_message(bot_token, record["chat_id"], record["message_id"]):
+            record["delete_pending"] = False
+            print(f"🗑️ أُعيدت محاولة حذف رسالة /long بنجاح: {key}")
+    save_message_ledger(STATE_DIR, BOT_NAME, ledger)
+
     if not long_commands:
         return
+
+    # قد يكون الطابور أُنشئ والـ ledger حُفظ قبل توقف التشغيل، لكن قبل حذف
+    # نسخة الأمر من Inbox. في هذه الحالة نؤكد الطلب ونزيله دون إعادة Gemini.
+    for item in long_commands:
+        key = message_key(item)
+        if ledger.get(key, {}).get("status") == "succeeded":
+            deleted = delete_message(bot_token, item["chat_id"], item["message_id"])
+            ledger[key]["pipeline"] = "long-smart"
+            ledger[key]["delete_pending"] = not deleted
+            acknowledge_smart_long_command(STATE_DIR, item)
 
     unique = []
     seen = set()
@@ -109,7 +130,7 @@ def process_long_commands(bot_token, long_commands, ledger):
         if key in seen:
             continue
         seen.add(key)
-        if ledger.get(key, {}).get("status") in {"succeeded", "upload_unknown", "processing"}:
+        if ledger.get(key, {}).get("status") in {"succeeded", "upload_unknown"}:
             continue
         unique.append(item)
 
@@ -134,7 +155,11 @@ def process_long_commands(bot_token, long_commands, ledger):
         ledger[key]["status"] = result
         ledger[key]["stage"] = "queue_created" if result == "succeeded" else "analysis_failed"
         if result == "succeeded":
-            if delete_message(bot_token, item["chat_id"], item["message_id"]):
+            deleted = delete_message(bot_token, item["chat_id"], item["message_id"])
+            ledger[key]["pipeline"] = "long-smart"
+            ledger[key]["delete_pending"] = not deleted
+            acknowledge_smart_long_command(STATE_DIR, item)
+            if deleted:
                 print(f"🗑️ حُذفت رسالة /long: {item['message_id']}")
             else:
                 print(f"⚠️ تعذر حذف رسالة /long: {item['message_id']}")

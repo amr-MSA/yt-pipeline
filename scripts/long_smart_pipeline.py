@@ -81,6 +81,13 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
         print(f"\n{'='*50}\n[/long {idx}/{len(long_commands)}] معالجة: {url}")
 
         try:
+            # إذا أُنشئ الطابور ثم انقطع التشغيل قبل تحديث ledger، لا نعيد
+            # استدعاء Gemini ولا ننشئ دفعة ثانية لنفس رسالة Telegram.
+            if queue_utils.queue_exists(STATE_DIR, queue_id):
+                print(f"⏭️ الطابور موجود مسبقًا لهذا الطلب: {queue_id}")
+                results[key] = "succeeded"
+                continue
+
             print("📝 سحب الترانسكريبت من يوتيوب...")
             transcript = fetch_transcript(url, os.path.join(WORK_DIR, f"t{idx}"), cookies_env)
             video_id = transcript["video_id"]
@@ -144,6 +151,7 @@ def _download_clip_range(url: str, start: float, end: float, out_path: str, cook
         "overwrites": True,
         "quiet": True,
         "noprogress": True,
+        "js_runtimes": {"deno": {}},
     }
     with temporary_cookie_file(cookies_env) as cookie_path:
         if cookie_path:
@@ -209,6 +217,7 @@ def run_daily_batch() -> None:
     cookies_env = os.environ.get("YT_COOKIES")
 
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    queue_utils.merge_latest_state(STATE_DIR)
 
     active_batches = queue_utils.list_active_batches(STATE_DIR)
     if not active_batches:
@@ -226,9 +235,13 @@ def run_daily_batch() -> None:
     recent_markers = recent_request_markers(youtube)
     print(f"[LONG-SMART][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب")
     unpublished_results: dict[int, list[str]] = {}
+    daily_summary: dict[int, list[str]] = {}
 
     def add_unpublished(chat_id: int, message: str) -> None:
         unpublished_results.setdefault(chat_id, []).append(message)
+
+    def add_summary(chat_id: int, message: str) -> None:
+        daily_summary.setdefault(chat_id, []).append(message)
 
     def send_unpublished_reports() -> None:
         for chat_id, results in unpublished_results.items():
@@ -275,6 +288,18 @@ def run_daily_batch() -> None:
                         bot_token, chat_id,
                         f"✅ تم تأكيد نشر مقطع {done + 1}/{total} سابقًا:\n{video_url}",
                     )
+                add_summary(chat_id, f"✅ مؤكد سابقًا: المقطع {done + 1}/{total} — {video_url}")
+                continue
+
+            if queue_utils.get_clip_status(STATE_DIR, queue_id, clip_idx) == "upload_unknown":
+                message = (
+                    f"⚠️ تعذر تأكيد رفع مقطع {done + 1}/{total} بعد انقطاع الاتصال. "
+                    "لن تتم إعادة رفعه تلقائيًا حمايةً من التكرار؛ راجع آخر فيديوهات القناة."
+                )
+                add_unpublished(chat_id, f"🆔 الطابور: {queue_id}\n{message}")
+                if bot_token:
+                    send_message(bot_token, chat_id, message)
+                add_summary(chat_id, f"⚠️ غير مؤكد: المقطع {done + 1}/{total}")
                 continue
 
             print(f"⬇️ تحميل المقطع ({clip['start']}-{clip['end']} ثانية)...")
@@ -306,6 +331,9 @@ def run_daily_batch() -> None:
 
             title_for_upload = f"{final_title} #Shorts" if clip["type"] == "shorts" else final_title
 
+            # سجّل بداية الرفع قبل استدعاء YouTube. عند انقطاع الاتصال بعد
+            # قبول YouTube للملف، نستخدم upload_unknown بدل إعادة الرفع.
+            queue_utils.mark_clip_uploading(STATE_DIR, queue_id, clip_idx)
             print("📤 رفع على يوتيوب (public)...")
             video_youtube_id = _upload(youtube, upload_file, title_for_upload, final_description)
             recent_markers[marker] = video_youtube_id
@@ -321,6 +349,7 @@ def run_daily_batch() -> None:
                     f"✅ نُشر مقطع {done + 1}/{total} من الفيديو المصدر "
                     f"\"{batch['source_title']}\" ({clip['type']}):\n{video_url}",
                 )
+            add_summary(chat_id, f"✅ نُشر: المقطع {done + 1}/{total} — {video_url}")
 
         except Exception as e:
             err = f"{e}"
@@ -336,7 +365,10 @@ def run_daily_batch() -> None:
                         "⚠️ تم الوصول لحد نشر يوتيوب اليومي (رصدناه من رسالة الخطأ). "
                         "سيتم إكمال النشر غدًا تلقائيًا.",
                     )
-                queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
+                if queue_utils.get_clip_status(STATE_DIR, queue_id, clip_idx) == "uploading":
+                    queue_utils.mark_clip_upload_unknown(STATE_DIR, queue_id, clip_idx, err)
+                else:
+                    queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
                 add_unpublished(
                     chat_id,
                     f"🆔 الطابور: {queue_id} — المقطع: {clip_idx + 1}\n"
@@ -344,7 +376,10 @@ def run_daily_batch() -> None:
                 )
                 break
 
-            queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
+            if queue_utils.get_clip_status(STATE_DIR, queue_id, clip_idx) == "uploading":
+                queue_utils.mark_clip_upload_unknown(STATE_DIR, queue_id, clip_idx, err)
+            else:
+                queue_utils.mark_clip_failed(STATE_DIR, queue_id, clip_idx, err)
             add_unpublished(
                 chat_id,
                 f"🆔 الطابور: {queue_id} — المقطع: {clip_idx + 1}\n"
@@ -355,6 +390,7 @@ def run_daily_batch() -> None:
                     bot_token, chat_id,
                     f"❌ فشل نشر أحد مقاطع \"{batch['source_title']}\":\n{err[:300]}",
                 )
+            add_summary(chat_id, f"❌ فشل: المقطع {done + 1}/{total} — {err[:180]}")
 
         finally:
             for f in os.listdir(DOWNLOAD_DIR):
@@ -364,6 +400,10 @@ def run_daily_batch() -> None:
                     pass
 
     send_unpublished_reports()
+    for chat_id, items in daily_summary.items():
+        report = "📋 ملخص تشغيل Smart Long اليوم:\n\n" + "\n".join(items)
+        for start in range(0, len(report), 3800):
+            send_message(bot_token, chat_id, report[start:start + 3800])
     print("\n🎉 انتهى التشغيل اليومي لخط long-smart.")
 
 

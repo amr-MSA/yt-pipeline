@@ -36,8 +36,8 @@ def test_fetch_all_new_messages_accepts_non_youtube_url():
             "text": "https://www.tiktok.com/@demo/video/123",
         },
     }
-    with patch.object(telegram_utils, "_fetch_updates", return_value=[update]):
-        links, long_commands = telegram_utils.fetch_all_new_messages("token", "/tmp", "shorts")
+    with tempfile.TemporaryDirectory() as tmp, patch.object(telegram_utils, "_fetch_updates", return_value=[update]):
+        links, long_commands = telegram_utils.fetch_all_new_messages("token", tmp, "shorts")
     assert links[0]["url"] == "https://www.tiktok.com/@demo/video/123"
     assert long_commands == []
 
@@ -90,10 +90,27 @@ def test_fetch_all_new_messages_accepts_non_youtube_long_command():
             "text": "/long https://vimeo.com/123456",
         },
     }
-    with patch.object(telegram_utils, "_fetch_updates", return_value=[update]):
-        links, long_commands = telegram_utils.fetch_all_new_messages("token", "/tmp", "shorts")
+    with tempfile.TemporaryDirectory() as tmp, patch.object(telegram_utils, "_fetch_updates", return_value=[update]):
+        links, long_commands = telegram_utils.fetch_all_new_messages("token", tmp, "shorts")
     assert links == []
     assert long_commands[0]["url"] == "https://vimeo.com/123456"
+
+
+def test_smart_long_command_is_replayed_from_inbox_without_new_updates():
+    update = {
+        "update_id": 1,
+        "message": {
+            "message_id": 2,
+            "chat": {"id": 7},
+            "text": "/long https://vimeo.com/123456",
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with patch.object(telegram_utils, "_fetch_updates", return_value=[update]):
+            telegram_utils.fetch_all_new_messages("token", tmp, "shorts")
+        with patch.object(telegram_utils, "_fetch_updates", return_value=[]):
+            _, long_commands = telegram_utils.fetch_all_new_messages("token", tmp, "shorts")
+        assert [item["url"] for item in long_commands] == ["https://vimeo.com/123456"]
 
 
 def test_urls_with_embedded_credentials_are_rejected():

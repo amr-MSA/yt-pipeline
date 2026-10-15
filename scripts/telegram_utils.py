@@ -125,6 +125,36 @@ def inbox_path(state_dir: str, bot_name: str) -> str:
     return os.path.join(state_dir, f"{bot_name}_inbox.json")
 
 
+def smart_long_inbox_path(state_dir: str) -> str:
+    """مسار Inbox مستقل لأوامر /long التي يعمل عليها Smart Long."""
+    return os.path.join(state_dir, "long_smart_inbox.json")
+
+
+def load_smart_long_inbox(state_dir: str) -> dict[str, dict]:
+    path = smart_long_inbox_path(state_dir)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_smart_long_inbox(state_dir: str, inbox: dict[str, dict]) -> None:
+    os.makedirs(state_dir, exist_ok=True)
+    path = smart_long_inbox_path(state_dir)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(inbox, f, ensure_ascii=False, indent=2, sort_keys=True)
+    os.replace(temp_path, path)
+
+
+def acknowledge_smart_long_command(state_dir: str, item: dict) -> None:
+    inbox = load_smart_long_inbox(state_dir)
+    inbox.pop(message_key(item), None)
+    save_smart_long_inbox(state_dir, inbox)
+
+
 def canonicalize_url(url: str) -> str:
     """يوحّد الرابط لإسقاط معاملات التتبع وصيغ YouTube المتكافئة."""
     try:
@@ -328,10 +358,15 @@ def fetch_new_links(
     )
 
 def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tuple[list[dict], list[dict]]:
-    """يجلب دفعة واحدة ويفرزها إلى روابط عادية وأوامر /long."""
+    """يجلب دفعة واحدة ويفرزها إلى روابط عادية وأوامر /long.
+
+    أوامر Smart Long تُحفظ في Inbox ذري قبل تأكيد Telegram offset، ثم تُعاد
+    في كل تشغيل حتى ينجح التحليل وإنشاء الطابور.
+    """
     updates = _fetch_updates(bot_token, state_dir, bot_name)
     links = []
     long_commands = []
+    smart_inbox = load_smart_long_inbox(state_dir)
 
     for msg in _iter_messages(updates):
         text = msg.get("text") or msg.get("caption") or ""
@@ -370,9 +405,14 @@ def fetch_all_new_messages(bot_token: str, state_dir: str, bot_name: str) -> tup
                 }
             )
 
-    # هذا المسار لا يملك Inbox بعد؛ لا نؤكد Telegram إلا بعد اكتمال القراءة.
+    for command in long_commands:
+        smart_inbox.setdefault(message_key(command), command)
+
+    # احفظ Inbox أولًا، ثم أكد Telegram offset؛ إذا توقف التحليل بعد ذلك
+    # فسيعود الأمر في التشغيل التالي بدل أن يضيع بعد تحديث offset.
+    save_smart_long_inbox(state_dir, smart_inbox)
     _acknowledge_updates(state_dir, bot_name, updates)
-    return links, long_commands
+    return links, list(smart_inbox.values())
 
 
 def _iter_messages(updates: list[dict]):

@@ -51,8 +51,11 @@ def _load(state_dir: str) -> dict:
 
 def _save(state_dir: str, data: dict) -> None:
     os.makedirs(state_dir, exist_ok=True)
-    with open(_quota_file(state_dir), "w", encoding="utf-8") as f:
+    path = _quota_file(state_dir)
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
 
 
 def can_publish(state_dir: str, daily_limit: int = DEFAULT_DAILY_LIMIT) -> bool:
