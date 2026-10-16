@@ -88,7 +88,7 @@ GitHub Actions لا يمكنه فتح متصفح لتسجيل الدخول، ل�
 | `LONG_BOT_TOKEN` | توكن بوت "لونق" من BotFather |
 | `SHORTS_BOT_TOKEN` | توكن بوت "شورتس" من BotFather (يستقبل أيضًا أوامر `/long`) |
 | `YOUTUBE_TOKEN_JSON` | محتوى ملف `youtube_token.json` كاملاً (نفس القناة، مشتركة بين كل الخطوط) |
-| `YT_COOKIES` | (اختياري) محتوى ملف cookies.txt إذا احتجت تجاوز قيود يوتيوب على بعض الفيديوهات |
+| `YT_COOKIES` | (اختياري) محتوى ملف cookies.txt حديث بصيغة Netscape؛ قد يرفض يوتيوب الكوكيز القديمة أو يدوّرها أمنيًا، وعندها يجب تصديرها مجددًا وتحديث الـ Secret |
 | `GEMINI_API_KEY` | مفتاح Gemini API (من Google AI Studio) — مطلوب لخط `/long` الذكي فقط |
 
 ---

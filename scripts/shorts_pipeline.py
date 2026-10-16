@@ -46,6 +46,9 @@ def download_clip(url: str, out_path: str) -> dict:
         "overwrites": True,
         "quiet": True,
         "noprogress": True,
+        # YouTube now requires a JS runtime for reliable player responses.
+        # Keep Shorts aligned with the Long and Long-Smart download paths.
+        "js_runtimes": {"deno": {}},
     }
     with temporary_cookie_file(os.environ.get("YT_COOKIES")) as cookie_path:
         if cookie_path:

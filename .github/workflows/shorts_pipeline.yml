@@ -30,11 +30,25 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Deno for yt-dlp EJS
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.3.0
+
       - name: Install ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
 
       - name: Install Python dependencies
         run: pip install -q -r requirements.txt
+
+      - name: Verify media runtimes
+        run: |
+          deno --version
+          ffmpeg -version | head -n 1
+
+      - name: Verify yt-dlp EJS installation
+        run: |
+          python -c 'import importlib.metadata; import yt_dlp; print("yt-dlp=" + yt_dlp.version.__version__); print("yt-dlp-ejs=" + importlib.metadata.version("yt-dlp-ejs"))'
 
       - name: Run shorts pipeline
         working-directory: scripts
