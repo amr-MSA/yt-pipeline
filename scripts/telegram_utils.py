@@ -13,9 +13,10 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 GENERIC_URL_RE = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 TRAILING_URL_PUNCTUATION = ".,!?;:'\"،؛؟)]}>"
 
-# نمط للتعرف على أمر /long متبوعًا برابط من أي منصة يدعمها yt-dlp.
+# نمط للتعرف على Long أو /long، بحالة أحرف مختلفة ومع أو بدون مسافة،
+# متبوعًا برابط من أي منصة يدعمها yt-dlp.
 LONG_COMMAND_RE = re.compile(
-    r"/long(?:@\w+)?\s+"
+    r"^\s*/?long(?:@\w+)?\s*"
     r"(https?://[^\s<>]+)",
     re.IGNORECASE,
 )

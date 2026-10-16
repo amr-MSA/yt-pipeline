@@ -126,6 +126,18 @@ def test_cookie_file_is_private_and_deleted_after_context():
     assert not Path(path).exists()
 
 
+def test_smart_long_accepts_long_with_any_case_and_optional_space_or_slash():
+    url = "https://www.youtube.com/watch?v=abc123"
+    updates = [
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": f"long {url}"}},
+        {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": f"Long{url}"}},
+        {"update_id": 3, "message": {"message_id": 3, "chat": {"id": 7}, "text": f"/LONG {url}"}},
+    ]
+    with patch.object(telegram_utils, "_fetch_updates", return_value=updates):
+        _, commands = telegram_utils.fetch_all_new_messages("token", "/tmp", "shorts")
+    assert [item["url"] for item in commands] == [url, url, url]
+
+
 def test_boundary_marker_discards_links_before_it():
     updates = [
         {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "https://example.com/old"}},
