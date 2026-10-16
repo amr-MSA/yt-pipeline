@@ -89,6 +89,7 @@ GitHub Actions لا يمكنه فتح متصفح لتسجيل الدخول، ل�
 | `SHORTS_BOT_TOKEN` | توكن بوت "شورتس" من BotFather (يستقبل أيضًا أوامر `/long`) |
 | `YOUTUBE_TOKEN_JSON` | محتوى ملف `youtube_token.json` كاملاً (نفس القناة، مشتركة بين كل الخطوط) |
 | `YT_COOKIES` | (اختياري) محتوى ملف cookies.txt حديث بصيغة Netscape؛ قد يرفض يوتيوب الكوكيز القديمة أو يدوّرها أمنيًا، وعندها يجب تصديرها مجددًا وتحديث الـ Secret |
+| `YT_TRANSCRIPT_PROXY` | (اختياري) رابط HTTP/HTTPS Proxy دوّار إذا حجب YouTube عنوان IP الخاص بـ GitHub Actions أثناء استخراج الترانسكريبت |
 | `GEMINI_API_KEY` | مفتاح Gemini API (من Google AI Studio) — مطلوب لخط `/long` الذكي فقط |
 
 ---

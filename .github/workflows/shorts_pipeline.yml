@@ -56,6 +56,7 @@ jobs:
           SHORTS_BOT_TOKEN: ${{ secrets.SHORTS_BOT_TOKEN }}
           YOUTUBE_TOKEN_JSON: ${{ secrets.YOUTUBE_TOKEN_JSON }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
+          YT_TRANSCRIPT_PROXY: ${{ secrets.YT_TRANSCRIPT_PROXY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python shorts_pipeline.py
 

@@ -124,6 +124,16 @@ def handle_new_long_commands(bot_token: str, long_commands: list[dict]) -> dict[
                     part_count=len(transcript_chunks),
                 )
                 total_clips += len(clips)
+            expected_queue_ids = [
+                queue_utils.queue_id_for_request(f"{key}:part:{part_index}")
+                for part_index in range(len(transcript_chunks))
+            ]
+            if not transcript_chunks or total_clips <= 0 or not all(
+                queue_utils.queue_exists(STATE_DIR, queue_id) for queue_id in expected_queue_ids
+            ):
+                raise RuntimeError(
+                    "لم تُحفظ كل دفعات Gemini في ملفات Queue؛ ستبقى رسالة الطلب للمحاولة التالية."
+                )
             results[key] = "succeeded"
 
             send_message(

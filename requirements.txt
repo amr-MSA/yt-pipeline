@@ -1,4 +1,5 @@
 yt-dlp[default]==2026.8.19
+youtube-transcript-api>=1.2.3
 google-auth>=2.29.0
 google-auth-oauthlib>=1.2.0
 google-auth-httplib2>=0.2.0
