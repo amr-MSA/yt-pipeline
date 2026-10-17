@@ -8,6 +8,7 @@ import os
 import traceback
 
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
@@ -55,6 +56,15 @@ def get_youtube_client(token_json_str: str):
         print("[LONG][AUTH][3/5] START: تجديد access token عبر Google", flush=True)
         try:
             creds.refresh(Request())
+        except RefreshError as exc:
+            message = (
+                "YOUTUBE_TOKEN_JSON يحتوي refresh_token منتهيًا أو ملغىً "
+                "(invalid_grant). YT_COOKIES لا تصلح هذا الخطأ؛ "
+                "أعد إنشاء youtube_token.json محليًا وحدّث GitHub Secret "
+                "YOUTUBE_TOKEN_JSON كاملًا."
+            )
+            print(f"[LONG][AUTH][3/5] FAIL: {message}", flush=True)
+            raise RuntimeError(message) from exc
         except Exception as exc:
             print(
                 f"[LONG][AUTH][3/5] FAIL: فشل تجديد التوكن — "
