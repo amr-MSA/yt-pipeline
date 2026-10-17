@@ -179,6 +179,20 @@ def main():
 
     print("🔎 جاري فحص رسائل بوت شورتس الجديدة...")
     links, long_commands = fetch_all_new_messages(bot_token, STATE_DIR, BOT_NAME)
+    manual_long_url = os.environ.get("MANUAL_LONG_URL", "").strip()
+    if manual_long_url:
+        manual_chat_id = int(os.environ.get("MANUAL_LONG_CHAT_ID", "6828354904"))
+        manual_message_id = int(os.environ.get("GITHUB_RUN_ID", "0"))
+        long_commands.append({
+            "url": manual_long_url,
+            "chat_id": manual_chat_id,
+            "message_id": manual_message_id,
+            "text": f"/long {manual_long_url}",
+        })
+        print(
+            f"📌 تشغيل يدوي لـ Smart Long: {manual_long_url} "
+            f"(message={manual_message_id})"
+        )
     send_batch_summary(bot_token, links, "رابط")
     send_batch_summary(bot_token, long_commands, "أمر /long")
     ledger = load_message_ledger(STATE_DIR, BOT_NAME)

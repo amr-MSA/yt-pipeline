@@ -11,7 +11,17 @@ on:
     - cron: '15 17 * * *'
     - cron: '15 19 * * *'
     - cron: '15 21 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      manual_long_url:
+        description: "رابط واحد لتحليله كـ Smart Long (اختياري)"
+        required: false
+        type: string
+      manual_long_chat_id:
+        description: "معرّف محادثة Telegram لإرسال النتيجة"
+        required: false
+        default: "6828354904"
+        type: string
 
 concurrency:
   group: shorts-pipeline
@@ -58,6 +68,8 @@ jobs:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
           YT_TRANSCRIPT_PROXY: ${{ secrets.YT_TRANSCRIPT_PROXY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MANUAL_LONG_URL: ${{ inputs.manual_long_url }}
+          MANUAL_LONG_CHAT_ID: ${{ inputs.manual_long_chat_id }}
         run: python shorts_pipeline.py
 
       - name: Commit updated state (offsets + message ledger + long-smart queues)
