@@ -1,17 +1,29 @@
 {
   "6828354904:3": {
-    "status": "failed_retryable",
-    "stage": "downloading",
+    "status": "succeeded",
+    "stage": "uploaded",
     "chat_id": 6828354904,
     "message_id": 3,
     "source_url": "https://www.youtube.com/live/pL7o4kxw2Xk?si=ym74OuyrjI-gttFF",
-    "error": "ERROR: [youtube] pL7o4kxw2Xk: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies"
+    "video_id": "er_tbyGBcrA",
+    "video_url": "https://youtu.be/er_tbyGBcrA"
   },
   "6828354904:7": {
-    "status": "failed_retryable",
-    "stage": "analysis_failed",
+    "status": "succeeded",
+    "stage": "uploaded",
     "chat_id": 6828354904,
     "message_id": 7,
-    "source_url": "https://www.youtube.com/live/pL7o4kxw2Xk?si=ym74OuyrjI-gttFF"
+    "source_url": "https://www.youtube.com/live/pL7o4kxw2Xk?si=ym74OuyrjI-gttFF",
+    "video_id": "BqYHNdCtruU",
+    "video_url": "https://youtu.be/BqYHNdCtruU"
+  },
+  "6828354904:39054217337": {
+    "status": "succeeded",
+    "stage": "uploaded",
+    "chat_id": 6828354904,
+    "message_id": 39054217337,
+    "source_url": "https://www.youtube.com/live/pL7o4kxw2Xk?si=ym74OuyrjI-gttFF",
+    "video_id": "qoI8oksyykg",
+    "video_url": "https://youtu.be/qoI8oksyykg"
   }
 }
