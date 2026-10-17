@@ -21,6 +21,7 @@ from telegram_utils import (
 )
 from youtube_auth import get_youtube_client
 from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
+from source_validation import probe_source_url
 import long_smart_pipeline
 import fixed_meta
 
@@ -217,10 +218,6 @@ def main():
         print("📭 لا توجد روابط شورتس عادية جديدة.")
         return
 
-    youtube = get_youtube_client(youtube_token_json)
-    print("[SHORTS][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)", flush=True)
-    recent_markers = recent_request_markers(youtube)
-    print(f"[SHORTS][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب", flush=True)
     total = len(links)
     unpublished_results: dict[int, list[str]] = {}
 
@@ -235,6 +232,43 @@ def main():
             )
             for start in range(0, len(report), 3800):
                 send_message(bot_token, chat_id, report[start:start + 3800])
+
+    # افحص كل رابط مصدر أولًا، قبل محاولة تجديد توكن YouTube.
+    source_checked_links = []
+    for item in links:
+        url = item["url"]
+        key = message_key(item)
+        print(f"[SHORTS][SOURCE_CHECK] START: {url}", flush=True)
+        try:
+            probe_source_url(url, os.environ.get("YT_COOKIES"))
+            source_checked_links.append(item)
+            print("[SHORTS][SOURCE_CHECK] OK: المصدر قابل للمعالجة", flush=True)
+        except Exception as exc:
+            error = f"تعذر فحص/تنزيل المصدر قبل YouTube: {exc}"
+            print(f"[SHORTS][SOURCE_CHECK] FAIL: {error}", flush=True)
+            ledger[key] = {
+                "status": "failed_retryable",
+                "stage": "source_check",
+                "chat_id": item["chat_id"],
+                "message_id": item["message_id"],
+                "source_url": url,
+                "error": error[:500],
+            }
+            save_message_ledger(STATE_DIR, BOT_NAME, ledger)
+            unpublished_results.setdefault(item["chat_id"], []).append(
+                f"🆔 رسالة الطلب: {item['message_id']}\n"
+                f"🎬 المصدر: {url}\n❌ السبب: {error[:500]}"
+            )
+    links = source_checked_links
+    if not links:
+        send_unpublished_reports()
+        return
+
+    print("[SHORTS][AUTH] START: تجهيز اتصال YouTube بعد فحص المصادر", flush=True)
+    youtube = get_youtube_client(youtube_token_json)
+    print("[SHORTS][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)", flush=True)
+    recent_markers = recent_request_markers(youtube)
+    print(f"[SHORTS][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب", flush=True)
 
     for idx, item in enumerate(links, 1):
         url = item["url"]

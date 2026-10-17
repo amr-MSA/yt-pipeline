@@ -32,6 +32,7 @@ from telegram_utils import (
 )
 from youtube_auth import get_youtube_client
 from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
+from source_validation import probe_source_url
 import fixed_meta
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -194,7 +195,29 @@ def main():
             for start in range(0, len(report), 3800):
                 send_message(bot_token, chat_id, report[start:start + 3800])
 
-    print("[LONG][AUTH] START: تجهيز اتصال YouTube قبل المعالجة", flush=True)
+    # افحص المصدر أولًا. هذا يفصل أخطاء Instagram/TikTok/yt-dlp عن OAuth
+    # ويمنع إظهار خطأ YouTube لرابط لا يمكن تنزيله أصلًا.
+    source_checked_links = []
+    for item in links:
+        print(f"[LONG][SOURCE_CHECK] START: {item['url']}", flush=True)
+        try:
+            probe_source_url(item["url"], os.environ.get("YT_COOKIES"))
+            source_checked_links.append(item)
+            print("[LONG][SOURCE_CHECK] OK: المصدر قابل للمعالجة", flush=True)
+        except Exception as exc:
+            error = f"تعذر فحص/تنزيل المصدر قبل YouTube: {exc}"
+            print(f"[LONG][SOURCE_CHECK] FAIL: {error}", flush=True)
+            add_unpublished(
+                item["chat_id"],
+                f"🆔 رسالة الطلب: {item['message_id']}\n"
+                f"🎬 المصدر: {item['url']}\n❌ السبب: {error[:500]}",
+            )
+    links = source_checked_links
+    if not links:
+        send_unpublished_reports()
+        return
+
+    print("[LONG][AUTH] START: تجهيز اتصال YouTube بعد فحص المصادر", flush=True)
     try:
         youtube = get_youtube_client(youtube_token_json)
     except Exception as exc:
