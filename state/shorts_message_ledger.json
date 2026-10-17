@@ -15,7 +15,9 @@
     "message_id": 7,
     "source_url": "https://www.youtube.com/live/pL7o4kxw2Xk?si=ym74OuyrjI-gttFF",
     "video_id": "BqYHNdCtruU",
-    "video_url": "https://youtu.be/BqYHNdCtruU"
+    "video_url": "https://youtu.be/BqYHNdCtruU",
+    "pipeline": "long-smart",
+    "delete_pending": true
   },
   "6828354904:39054217337": {
     "status": "succeeded",
@@ -25,5 +27,14 @@
     "source_url": "https://www.youtube.com/live/pL7o4kxw2Xk?si=ym74OuyrjI-gttFF",
     "video_id": "qoI8oksyykg",
     "video_url": "https://youtu.be/qoI8oksyykg"
+  },
+  "6828354904:39059476481": {
+    "status": "succeeded",
+    "stage": "queue_created",
+    "chat_id": 6828354904,
+    "message_id": 39059476481,
+    "source_url": "https://www.youtube.com/live/pL7o4kxw2Xk?si=ym74OuyrjI-gttFF",
+    "pipeline": "long-smart",
+    "delete_pending": true
   }
 }
