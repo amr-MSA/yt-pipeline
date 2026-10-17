@@ -9,7 +9,8 @@ import re
 
 import requests
 
-GEMINI_MODEL = "gemini-2.0-flash"
+# أحدث نموذج Flash مستقر ومتاح ضمن الطبقة المجانية وفق توثيق Google.
+GEMINI_MODEL = "gemini-3.8-flash"
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     "{model}:generateContent?key={api_key}"
@@ -92,7 +93,6 @@ def suggest_clips(api_key: str, video_title: str, segments: list[dict]) -> list[
         "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTIONS}]},
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.7,
             "responseMimeType": "application/json",
         },
     }
