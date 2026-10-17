@@ -1,4 +1,4 @@
-name: Long Pipeline (Telegram → YouTube)
+name: Main Channel - Long Publisher
 
 on:
   schedule:
