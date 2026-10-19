@@ -8,7 +8,6 @@
 """
 import os
 import re
-import subprocess
 import sys
 import time
 import traceback
@@ -78,32 +77,6 @@ def download_video(url: str, out_path: str) -> dict:
             info = ydl.extract_info(url, download=True)
             print(f"[LONG][DOWNLOAD] OK: title={info.get('title', 'غير معروف')}", flush=True)
             return info
-
-
-def apply_long_template(raw_path: str, final_path: str) -> bool:
-    """ضع الفيديو الكامل داخل قالب 16:9 بسيط مناسب للنشر الطويل.
-
-    لا نقص المحتوى هنا: نحافظ على مدة الفيديو كاملة، وننشئ خلفية ممتدة
-    ومموهة مع فيديو أمامي مضبوط داخل إطار 1920x1080.
-    """
-    cmd = [
-        "ffmpeg", "-y", "-i", raw_path,
-        "-filter_complex",
-        "[0:v]split=2[bgsrc][fgsrc];"
-        "[bgsrc]scale=1920:1080:force_original_aspect_ratio=increase,"
-        "crop=1920:1080,boxblur=20:10[bg];"
-        "[fgsrc]scale=1760:990:force_original_aspect_ratio=decrease[fg];"
-        "[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p[v]",
-        "-map", "[v]", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
-        final_path,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"⚠️ فشل تطبيق قالب Long؛ سيُرفع الأصل: {result.stderr[-500:]}")
-        return False
-    return True
 
 
 def upload_video(youtube, file_path: str, title: str, description: str) -> str:
@@ -339,13 +312,6 @@ def main():
             if not os.path.isfile(actual_file):
                 raise FileNotFoundError("yt-dlp لم ينتج ملف الفيديو المتوقع.")
 
-            # مرحلة القالب: الفيديو يبقى كاملًا، لكن يُجهز داخل إخراج 16:9
-            # قبل الرفع. عند فشل ffmpeg نرجع للأصل بدل إسقاط الطلب كله.
-            templated_file = os.path.join(DOWNLOAD_DIR, f"templated_{idx}.mp4")
-            upload_file = actual_file
-            if apply_long_template(actual_file, templated_file):
-                upload_file = templated_file
-
             # سجّل بدء طلب الرفع قبل استدعاء YouTube. إذا انقطع الاتصال بعد
             # قبول الطلب فلن نملك videoId، لذلك نمنع إعادة الرفع التلقائي.
             uploaded[key] = {
@@ -356,7 +322,7 @@ def main():
             }
             save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
             print("📤 رفع على يوتيوب (public)...")
-            video_id = upload_video(youtube, upload_file, title, desc)
+            video_id = upload_video(youtube, actual_file, title, desc)
             video_url = f"https://youtu.be/{video_id}"
             print(f"✅ تم النشر وتأكيد videoId: {video_url}")
 
