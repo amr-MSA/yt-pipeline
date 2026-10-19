@@ -80,57 +80,6 @@ def download_video(url: str, out_path: str) -> dict:
             return info
 
 
-def select_long_render_mode(info: dict) -> str:
-    """اختر طريقة الإخراج من metadata بدل الاعتماد على المدة وحدها.
-
-    - عمودي <= 180 ثانية: قالب Shorts الحالي (9:16).
-    - أفقي واضح وأطول من 180 ثانية: نشر الأصل كما هو.
-    - عمودي/مربع طويل أو metadata ناقصة: قالب Long أفقي 16:9.
-    """
-    try:
-        duration = float(info.get("duration") or 0)
-    except (TypeError, ValueError):
-        duration = 0
-    try:
-        width = float(info.get("width") or 0)
-        height = float(info.get("height") or 0)
-    except (TypeError, ValueError):
-        width = height = 0
-
-    is_vertical = height > 0 and width > 0 and height > width * 1.15
-    is_landscape = width > 0 and height > 0 and width >= height * 1.55
-    if duration and duration <= 180 and is_vertical:
-        return "short-template"
-    if duration > 180 and is_landscape:
-        return "raw-landscape"
-    return "long-template"
-
-
-def apply_vertical_template(raw_path: str, final_path: str) -> bool:
-    """ضع فيديو قصيرًا عموديًا داخل قالب Shorts 1080x1920."""
-    template_path = os.path.join(PROJECT_DIR, "assets", "template.png")
-    if not os.path.exists(template_path):
-        print("⚠️ لا يوجد قالب Shorts؛ سيُرفع الأصل.")
-        return False
-    cmd = [
-        "ffmpeg", "-y", "-i", template_path, "-i", raw_path,
-        "-filter_complex",
-        "[0:v]scale=1080:1920[bg];"
-        "[1:v]scale=936:1305:force_original_aspect_ratio=increase,"
-        "crop=936:1305[vid];"
-        "[bg][vid]overlay=72:303:format=auto,format=yuv420p[v]",
-        "-map", "[v]", "-map", "1:a?",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
-        final_path,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"⚠️ فشل تطبيق قالب Shorts؛ سيُرفع الأصل: {result.stderr[-500:]}")
-        return False
-    return True
-
-
 def apply_long_template(raw_path: str, final_path: str) -> bool:
     """ضع الفيديو الكامل داخل قالب 16:9 بسيط مناسب للنشر الطويل.
 
@@ -390,23 +339,12 @@ def main():
             if not os.path.isfile(actual_file):
                 raise FileNotFoundError("yt-dlp لم ينتج ملف الفيديو المتوقع.")
 
-            # اختيار الإخراج من مدة الفيديو ونسبته، لا من المدة وحدها.
-            render_mode = select_long_render_mode(info)
-            print(
-                f"[LONG][TEMPLATE] mode={render_mode} "
-                f"duration={info.get('duration')} size={info.get('width')}x{info.get('height')}",
-                flush=True,
-            )
+            # مرحلة القالب: الفيديو يبقى كاملًا، لكن يُجهز داخل إخراج 16:9
+            # قبل الرفع. عند فشل ffmpeg نرجع للأصل بدل إسقاط الطلب كله.
             templated_file = os.path.join(DOWNLOAD_DIR, f"templated_{idx}.mp4")
             upload_file = actual_file
-            if render_mode == "short-template":
-                if apply_vertical_template(actual_file, templated_file):
-                    upload_file = templated_file
-            elif render_mode == "long-template":
-                if apply_long_template(actual_file, templated_file):
-                    upload_file = templated_file
-            else:
-                print("[LONG][TEMPLATE] أفقي طويل؛ رفع الأصل دون قالب.", flush=True)
+            if apply_long_template(actual_file, templated_file):
+                upload_file = templated_file
 
             # سجّل بدء طلب الرفع قبل استدعاء YouTube. إذا انقطع الاتصال بعد
             # قبول الطلب فلن نملك videoId، لذلك نمنع إعادة الرفع التلقائي.
