@@ -514,5 +514,32 @@
     "url": "https://www.instagram.com/reel/DdBMk00I9j2/?srtk=MWlleXk3N2QweTJldg==",
     "published_at": 1792781798,
     "deleted": true
+  },
+  "6828354904:373": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 373,
+    "video_id": "QuRJmmr5pwY",
+    "url": "https://www.instagram.com/reel/DerxeQ4syM7/?dlrf=MWx0eGwyN3g0cDhqZA==",
+    "published_at": 1792819958,
+    "deleted": true
+  },
+  "6828354904:374": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 374,
+    "video_id": "LGkhDkKwEUE",
+    "url": "https://www.instagram.com/reel/Dey7k_Uo8U_/?xtok=NWFnaTJ4dDQ4emhu",
+    "published_at": 1792819962,
+    "deleted": true
+  },
+  "6828354904:375": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 375,
+    "video_id": "QC-_iHZO3K4",
+    "url": "https://www.instagram.com/reel/DewXV8_o6Ei/?cplk=dmUweTlobGs4NHdi",
+    "published_at": 1792819967,
+    "deleted": true
   }
 }
