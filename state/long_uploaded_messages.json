@@ -550,5 +550,50 @@
     "url": "https://www.instagram.com/reel/DeC90iDxL7O/?exln=Yzl1Y3E1eGp2MWFw",
     "published_at": 1792838072,
     "deleted": true
+  },
+  "6828354904:386": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 386,
+    "video_id": "HkWQHnDO4Fo",
+    "url": "https://www.instagram.com/reel/DbED3WksfSF/?rpxt=dDMzcG50dmcwM21r",
+    "published_at": 1792987019,
+    "deleted": true
+  },
+  "6828354904:392": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 392,
+    "video_id": "zyE0GOu8gVI",
+    "url": "https://www.instagram.com/reel/DdbZSbUN3Ym/?obrf=emp2cWgxb3N6amx0",
+    "published_at": 1792987022,
+    "deleted": true
+  },
+  "6828354904:393": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 393,
+    "video_id": "dT72zh_Ni9o",
+    "url": "https://www.instagram.com/reel/De40DcJoN_8/?mdxt=OHMxdGE2cjc0OTVn",
+    "published_at": 1792987025,
+    "deleted": true
+  },
+  "6828354904:394": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 394,
+    "video_id": "qc80EN9tbxA",
+    "url": "https://www.instagram.com/reel/Dd9WMdSMw6O/?vrfl=YmhzMGE1Z2FpNjgz",
+    "published_at": 1792987028,
+    "deleted": true
+  },
+  "6828354904:395": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 395,
+    "video_id": "M2XS0sKQTPU",
+    "url": "https://www.instagram.com/reel/DdAXGX3K9rD/?exln=MWp3Y2g3c3VjYjljdw==",
+    "published_at": 1792987031,
+    "deleted": true
   }
 }
