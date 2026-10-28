@@ -13,13 +13,6 @@
     "url": "https://www.instagram.com/reel/DbyEB_ZRk8E/?srtk=MTNycmI4bTVpazgwYg==",
     "video_id": "7VekBad_CX0"
   },
-  "https://www.instagram.com/reel/Dc38mJbN8vW?cplk=MTM5YzQ0N3QyM2xmbg%3D%3D": {
-    "canonical_url": "https://www.instagram.com/reel/Dc38mJbN8vW?cplk=MTM5YzQ0N3QyM2xmbg%3D%3D",
-    "expires_at": 1793181451,
-    "published_at": 1793008651,
-    "url": "https://www.instagram.com/reel/Dc38mJbN8vW/?cplk=MTM5YzQ0N3QyM2xmbg==",
-    "video_id": "CJEhAdRKhqQ"
-  },
   "https://www.instagram.com/reel/Dd1mrepMOV_?psln=YzVpYTh0M203NHI3": {
     "canonical_url": "https://www.instagram.com/reel/Dd1mrepMOV_?psln=YzVpYTh0M203NHI3",
     "expires_at": 1793259071,
@@ -54,5 +47,19 @@
     "published_at": 1793110251,
     "url": "https://www.instagram.com/reel/De_O-FktLW4/?xtok=ajJwbnYxeWEwcWhm",
     "video_id": "3UqIuo1ubIk"
+  },
+  "https://www.instagram.com/reel/DeejDlINHxw?srtk=MWQ3OXlhcDQyMjZkaQ%3D%3D": {
+    "canonical_url": "https://www.instagram.com/reel/DeejDlINHxw?srtk=MWQ3OXlhcDQyMjZkaQ%3D%3D",
+    "expires_at": 1793358470,
+    "published_at": 1793185670,
+    "url": "https://www.instagram.com/reel/DeejDlINHxw/?srtk=MWQ3OXlhcDQyMjZkaQ==",
+    "video_id": "MOr28RgSeOs"
+  },
+  "https://www.instagram.com/reel/DfA-b_4Nop9?psln=MWxpYmFoZWhobTU2bw%3D%3D": {
+    "canonical_url": "https://www.instagram.com/reel/DfA-b_4Nop9?psln=MWxpYmFoZWhobTU2bw%3D%3D",
+    "expires_at": 1793358474,
+    "published_at": 1793185674,
+    "url": "https://www.instagram.com/reel/DfA-b_4Nop9/?psln=MWxpYmFoZWhobTU2bw==",
+    "video_id": "7R250iuZmAY"
   }
 }
