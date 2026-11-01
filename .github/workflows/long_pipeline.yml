@@ -2,8 +2,11 @@ name: Main Channel - Long Publisher
 
 on:
   schedule:
-    # كل ساعة حسب UTC؛ يعالج كل ما بقي في Inbox، بما فيه الأعمال القديمة الفاشلة.
-    - cron: '0 * * * *'
+    # الجدول السابق محفوظ كسطر تعليق للتراجع السريع.
+    # - cron: '0 * * * *'
+    - cron: '30 11 * * *'
+    - cron: '30 17 * * *'
+    - cron: '0 22 * * *'
   workflow_dispatch: {}
 
 concurrency:
