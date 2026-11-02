@@ -20,6 +20,8 @@ LONG_COMMAND_RE = re.compile(
     r"(https?://[^\s<>]+)",
     re.IGNORECASE,
 )
+AGG_PREFIX_RE = re.compile(r"^\s*(?:/agg(?:@\w+)?|agg|تجميع)\b", re.IGNORECASE)
+AGG_TOKEN_RE = re.compile(r"https?://[^\s<>]+|[123](?:\.mp4)?", re.IGNORECASE)
 TAKE_TITLE_COMMAND_RE = re.compile(r"^/take(?:@\w+)?$", re.IGNORECASE)
 DEFAULT_TITLE_COMMAND_RE = re.compile(r"^/d(?:@\w+)?$", re.IGNORECASE)
 CUSTOM_TITLE_COMMAND_RE = re.compile(
@@ -54,6 +56,57 @@ def extract_urls(text: str) -> list[str]:
     """يستخرج روابط HTTP(S) من أي منصة، مع إزالة punctuation المحيط."""
     urls = (_clean_url(match.group(0)) for match in GENERIC_URL_RE.finditer(text))
     return [url for url in urls if _is_safe_url(url)]
+
+
+def is_aggregate_command(text: str) -> bool:
+    """يتعرف على /agg أو agg أو تجميع دون الخلط مع رسائل الروابط العادية."""
+    return bool(AGG_PREFIX_RE.match(text or ""))
+
+
+def parse_aggregate_command(text: str) -> dict:
+    """يفك رسالة التجميع إلى عنوان وتسلسل local/remote مع الحفاظ على الترتيب."""
+    match = AGG_PREFIX_RE.match(text or "")
+    if not match:
+        raise ValueError("يجب أن تبدأ الرسالة بـ /agg أو تجميع.")
+    rest = (text or "")[match.end():].strip()
+    first_token = AGG_TOKEN_RE.search(rest)
+    if not first_token:
+        raise ValueError("أضف التسلسل: 1 ثم روابط المقاطع ثم 3.")
+    title = rest[:first_token.start()].strip()
+    if len(title) >= 2 and title[0] in {'"', '“'} and title[-1] in {'"', '”'}:
+        title = title[1:-1].strip()
+    token_text = rest[first_token.start():]
+    tokens = []
+    cursor = 0
+    for token_match in AGG_TOKEN_RE.finditer(token_text):
+        gap = token_text[cursor:token_match.start()].strip()
+        if gap:
+            raise ValueError(f"عنصر غير مفهوم قرب: {gap[:80]}")
+        raw = token_match.group(0)
+        if raw.lower().endswith(".mp4"):
+            value = raw[:-4]
+            kind = "local"
+        elif raw.isdigit():
+            value = raw
+            kind = "local"
+        else:
+            value = _clean_url(raw)
+            kind = "remote"
+            if not _is_safe_url(value):
+                raise ValueError(f"الرابط غير صالح أو يحتوي بيانات دخول: {value}")
+        tokens.append({"kind": kind, "value": value})
+        cursor = token_match.end()
+    if token_text[cursor:].strip():
+        raise ValueError(f"عنصر غير مفهوم في نهاية الرسالة: {token_text[cursor:].strip()[:80]}")
+    if not tokens or tokens[0] != {"kind": "local", "value": "1"}:
+        raise ValueError("يجب أن يبدأ الأمر بالملف المحلي 1 أو 1.mp4 للمقدمة.")
+    if tokens[-1] != {"kind": "local", "value": "3"}:
+        raise ValueError("يجب أن ينتهي الأمر بالملف المحلي 3 أو 3.mp4 للخاتمة.")
+    if not any(item["kind"] == "remote" for item in tokens):
+        raise ValueError("أضف رابط مقطع واحداً على الأقل بين المقدمة والخاتمة.")
+    if any(item["kind"] == "local" and item["value"] not in {"1", "2", "3"} for item in tokens):
+        raise ValueError("الملفات المحلية المسموحة حالياً هي 1.mp4 و2.mp4 و3.mp4 فقط.")
+    return {"title": title or None, "sequence": tokens}
 
 
 def extract_inline_title(text: str) -> str | None:
@@ -318,6 +371,35 @@ def fetch_new_links(
             last_link_by_chat = {}
             continue
         chat_id = msg["chat"]["id"]
+        if is_aggregate_command(text):
+            try:
+                aggregate = parse_aggregate_command(text)
+                aggregate_item = {
+                    "kind": "aggregate",
+                    "url": next(
+                        item["value"] for item in aggregate["sequence"]
+                        if item["kind"] == "remote"
+                    ),
+                    "canonical_url": f"agg:{chat_id}:{msg['message_id']}",
+                    "aggregate": aggregate,
+                    "chat_id": chat_id,
+                    "message_id": msg["message_id"],
+                    "date": int(msg.get("date", time.time())),
+                    "text": text.strip(),
+                }
+            except ValueError as exc:
+                aggregate_item = {
+                    "kind": "aggregate_error",
+                    "url": "",
+                    "canonical_url": f"agg:{chat_id}:{msg['message_id']}",
+                    "aggregate_error": str(exc),
+                    "chat_id": chat_id,
+                    "message_id": msg["message_id"],
+                    "date": int(msg.get("date", time.time())),
+                    "text": text.strip(),
+                }
+            new_links.append(aggregate_item)
+            continue
         if _apply_title_command(text, last_link_by_chat.get(chat_id)):
             continue
         if LONG_COMMAND_RE.search(text):

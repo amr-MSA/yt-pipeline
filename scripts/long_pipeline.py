@@ -33,11 +33,14 @@ from telegram_utils import (
 from youtube_auth import get_youtube_client
 from youtube_dedupe import append_request_marker, recent_request_markers, request_marker
 from source_validation import probe_source_url
+from aggregate_pipeline import build_aggregate_video
 import fixed_meta
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(PROJECT_DIR, "state")
 DOWNLOAD_DIR = os.path.join(PROJECT_DIR, "downloads_long")
+AGGREGATE_WORK_DIR = os.path.join(PROJECT_DIR, "work_aggregate")
+VIDEOS_DIR = os.path.join(PROJECT_DIR, "videos")
 BOT_NAME = "long"
 DEFAULT_TITLE = "مقطع اليوم"
 TITLE_FALLBACK_PREFIX = "ميمز العرب #"
@@ -140,6 +143,87 @@ def reconcile_uploaded_messages(bot_token: str, uploaded: dict) -> dict:
     return pending
 
 
+def process_aggregate_item(
+    item: dict,
+    bot_token: str,
+    youtube,
+    uploaded: dict,
+    batch_results: dict[int, list[str]],
+    unpublished_results: dict[int, list[str]],
+) -> None:
+    """ينفذ رسالة /agg بعد أن جهز parser التسلسل المحلي والبعيد."""
+    chat_id = item["chat_id"]
+    message_id = item["message_id"]
+    key = message_key(item)
+    title = item["aggregate"].get("title") or f"{TITLE_FALLBACK_PREFIX}{message_id}"
+    marker = request_marker("aggregate", key)
+    try:
+        existing = uploaded.get(key)
+        if existing and existing.get("status") == "succeeded":
+            video_url = f"https://youtu.be/{existing['video_id']}"
+            add = batch_results.setdefault(chat_id, [])
+            add.append(f"⏭️ تم تأكيد تجميع سابق لهذه الرسالة\n📺 YouTube: {video_url}")
+            acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
+            return
+
+        work_dir = os.path.join(AGGREGATE_WORK_DIR, str(message_id))
+        os.makedirs(work_dir, exist_ok=True)
+        print(f"[AGG] بناء التجميعة للرسالة {message_id}: {title}", flush=True)
+        final_path = build_aggregate_video(
+            item["aggregate"]["sequence"],
+            VIDEOS_DIR,
+            work_dir,
+            os.environ.get("YT_COOKIES"),
+        )
+        uploaded[key] = {
+            "status": "uploading",
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "url": item.get("text", ""),
+            "kind": "aggregate",
+            "title": title,
+        }
+        save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+        video_id = upload_video(youtube, final_path, title, DEFAULT_DESCRIPTION)
+        video_url = f"https://youtu.be/{video_id}"
+        uploaded[key] = {
+            "status": "succeeded",
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "video_id": video_id,
+            "url": item.get("text", ""),
+            "kind": "aggregate",
+            "published_at": int(time.time()),
+        }
+        save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+        acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
+        if delete_message(bot_token, chat_id, message_id):
+            uploaded[key]["deleted"] = True
+            save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+        batch_results.setdefault(chat_id, []).append(
+            f"✅ تم نشر التجميعة بنجاح\n🆔 رسالة الطلب: {message_id}\n"
+            f"📝 العنوان: {title}\n📺 YouTube: {video_url}"
+        )
+    except Exception as exc:
+        error = str(exc)
+        print(f"[AGG] FAIL: {error}", flush=True)
+        if uploaded.get(key, {}).get("status") == "uploading":
+            uploaded[key]["status"] = "upload_unknown"
+            uploaded[key]["error"] = error[:500]
+            save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+        batch_results.setdefault(chat_id, []).append(f"❌ فشلت معالجة التجميعة: {error[:400]}")
+        unpublished_results.setdefault(chat_id, []).append(
+            f"🆔 رسالة الطلب: {message_id}\n❌ السبب: {error[:500]}"
+        )
+    finally:
+        if os.path.isdir(os.path.join(AGGREGATE_WORK_DIR, str(message_id))):
+            for name in os.listdir(os.path.join(AGGREGATE_WORK_DIR, str(message_id))):
+                try:
+                    os.remove(os.path.join(AGGREGATE_WORK_DIR, str(message_id), name))
+                except OSError:
+                    pass
+
+
 def main():
     print("[LONG][BOOT] START: تهيئة مسار اللونق", flush=True)
     bot_token = os.environ["LONG_BOT_TOKEN"]
@@ -199,6 +283,16 @@ def main():
     # ويمنع إظهار خطأ YouTube لرابط لا يمكن تنزيله أصلًا.
     source_checked_links = []
     for item in links:
+        if item.get("kind") == "aggregate_error":
+            add_unpublished(
+                item["chat_id"],
+                f"🆔 رسالة الطلب: {item['message_id']}\n❌ أمر التجميع غير صالح: {item['aggregate_error']}",
+            )
+            acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
+            continue
+        if item.get("kind") == "aggregate":
+            source_checked_links.append(item)
+            continue
         print(f"[LONG][SOURCE_CHECK] START: {item['url']}", flush=True)
         try:
             probe_source_url(item["url"], os.environ.get("YT_COOKIES"))
@@ -234,6 +328,18 @@ def main():
     print("[LONG][DEDUPE] START: فحص آخر 10 فيديوهات القناة (Long + Shorts)", flush=True)
     recent_markers = recent_request_markers(youtube)
     print(f"[LONG][DEDUPE] OK: تم العثور على {len(recent_markers)} معرف طلب", flush=True)
+
+    aggregate_links = [item for item in links if item.get("kind") == "aggregate"]
+    links = [item for item in links if item.get("kind") != "aggregate"]
+    for item in aggregate_links:
+        process_aggregate_item(
+            item,
+            bot_token,
+            youtube,
+            uploaded,
+            batch_results,
+            unpublished_results,
+        )
 
     for idx, item in enumerate(links, 1):
         url = item["url"]
