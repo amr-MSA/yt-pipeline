@@ -5,9 +5,9 @@ import re
 
 REQUEST_MARKER_PREFIX = "yt-pipeline-request:"
 # الصيغة الجديدة قصيرة وقابلة للقراءة: #<bot>-<chat_id>-<message_id>.
-# Long = 1، وبوت Shorts (ويشمل long-smart الذي يعمل من خلاله) = 2.
+# Long = 1، وبوت Shorts (ويشمل long-smart الذي يعمل من خلاله) = 2، والتجميع = 3.
 BOT_CODES = {"long": "1", "shorts": "2", "long-smart": "2", "aggregate": "3"}
-CODE_MARKER_RE = re.compile(r"(?<![\w#])#[12]-[^\s]+")
+CODE_MARKER_RE = re.compile(r"(?<![\w#])#[123]-[^\s]+")
 # نقرأ الصيغة القديمة حتى تبقى المقاطع المنشورة قبل هذا التغيير قابلة للاكتشاف.
 LEGACY_MARKER_RE = re.compile(r"yt-pipeline-request:[^\s]+")
 

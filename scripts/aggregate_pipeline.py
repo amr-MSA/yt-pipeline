@@ -35,15 +35,26 @@ def _normalize(input_path: Path, output_path: Path) -> None:
     )
     has_audio = bool(audio_probe.stdout.strip())
     command = ["ffmpeg", "-y", "-i", str(input_path)]
+    video_duration = None
     if not has_audio:
+        duration_probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(input_path)],
+            capture_output=True, text=True,
+        )
+        try:
+            video_duration = float(duration_probe.stdout.strip())
+        except ValueError:
+            video_duration = None
         command += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+        if video_duration and video_duration > 0:
+            command += ["-t", f"{video_duration:.6f}"]
     command += [
         "-map", "0:v:0", "-map", "1:a:0" if not has_audio else "0:a:0",
         "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,"
                "pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p",
         "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
         "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
-        "-shortest",
         "-movflags", "+faststart", str(output_path),
     ]
     result = subprocess.run(command, capture_output=True, text=True)

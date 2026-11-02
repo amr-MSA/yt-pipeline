@@ -153,12 +153,15 @@ def process_aggregate_item(
     unpublished_results: dict[int, list[str]],
 ) -> None:
     """ينفذ رسالة /agg بعد أن جهز parser التسلسل المحلي والبعيد."""
-    chat_id = item["chat_id"]
-    message_id = item["message_id"]
-    key = message_key(item)
-    title = item["aggregate"].get("title") or f"{TITLE_FALLBACK_PREFIX}{message_id}"
-    marker = request_marker("aggregate", key)
+    chat_id = item.get("chat_id") if isinstance(item, dict) else None
+    message_id = item.get("message_id") if isinstance(item, dict) else None
+    key = f"{chat_id}:{message_id}"
     try:
+        if chat_id is None or message_id is None or not isinstance(item.get("aggregate"), dict):
+            raise ValueError("بيانات طلب التجميع ناقصة أو غير صالحة.")
+        key = message_key(item)
+        title = item["aggregate"].get("title") or f"{TITLE_FALLBACK_PREFIX}{message_id}"
+        marker = request_marker("aggregate", key)
         existing = uploaded.get(key)
         youtube_existing_id = recent_markers.get(marker)
         if youtube_existing_id:
@@ -185,10 +188,10 @@ def process_aggregate_item(
             add.append(f"⏭️ تم تأكيد تجميع سابق لهذه الرسالة\n📺 YouTube: {video_url}")
             acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
             return
-        if existing and existing.get("status") == "upload_unknown":
+        if existing and existing.get("status") in {"uploading", "upload_unknown"}:
             acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
             batch_results.setdefault(chat_id, []).append(
-                "⚠️ توقف طلب التجميع لأن نتيجة الرفع السابق غير مؤكدة. "
+                "⚠️ توقف طلب التجميع لأن محاولة الرفع السابقة غير مؤكدة. "
                 "تحقق من YouTube يدوياً قبل إعادة إرسال الطلب."
             )
             return

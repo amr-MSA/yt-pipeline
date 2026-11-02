@@ -9,13 +9,13 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from aggregate_pipeline import build_aggregate_video
 
 
-def _make_clip(path: Path, with_audio: bool) -> None:
+def _make_clip(path: Path, with_audio: bool, duration: float = 1) -> None:
     command = [
-        "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x180:d=1",
+        "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=blue:s=320x180:d={duration}",
     ]
     if with_audio:
-        command += ["-f", "lavfi", "-i", "sine=frequency=440:duration=1"]
-    command += ["-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p"]
+        command += ["-f", "lavfi", "-i", "sine=frequency=440:duration=0.8"]
+    command += ["-t", str(duration), "-c:v", "libx264", "-pix_fmt", "yuv420p"]
     if with_audio:
         command += ["-c:a", "aac"]
     command += [str(path)]
@@ -30,9 +30,9 @@ def test_build_aggregate_adds_audio_to_silent_clip():
         videos = root / "videos"
         work = root / "work"
         videos.mkdir()
-        _make_clip(videos / "1.mp4", with_audio=False)
-        _make_clip(videos / "2.mp4", with_audio=True)
-        _make_clip(videos / "3.mp4", with_audio=False)
+        _make_clip(videos / "1.mp4", with_audio=False, duration=2)
+        _make_clip(videos / "2.mp4", with_audio=True, duration=2)
+        _make_clip(videos / "3.mp4", with_audio=False, duration=2)
         output = build_aggregate_video(
             [
                 {"kind": "local", "value": "1"},
@@ -49,3 +49,9 @@ def test_build_aggregate_adds_audio_to_silent_clip():
             check=True, capture_output=True, text=True,
         )
         assert probe.stdout.strip()
+        duration_probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", output],
+            check=True, capture_output=True, text=True,
+        )
+        assert float(duration_probe.stdout.strip()) >= 5.5
