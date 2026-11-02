@@ -106,6 +106,16 @@ def parse_aggregate_command(text: str) -> dict:
         raise ValueError("أضف رابط مقطع واحداً على الأقل بين المقدمة والخاتمة.")
     if any(item["kind"] == "local" and item["value"] not in {"1", "2", "3"} for item in tokens):
         raise ValueError("الملفات المحلية المسموحة حالياً هي 1.mp4 و2.mp4 و3.mp4 فقط.")
+    if not any(item == {"kind": "local", "value": "2"} for item in tokens):
+        raise ValueError("أضف الفاصل 2 أو 2.mp4 بين مجموعات المقاطع.")
+    body = tokens[1:-1]
+    if any(item == {"kind": "local", "value": "1"} or item == {"kind": "local", "value": "3"} for item in body):
+        raise ValueError("يُسمح بالملف 1 في البداية والملف 3 في النهاية فقط.")
+    if body[0]["kind"] != "remote" or body[-1]["kind"] != "remote":
+        raise ValueError("يجب أن يكون كل فاصل 2 بين روابط مقاطع، لا في البداية أو النهاية.")
+    for previous, current in zip(body, body[1:]):
+        if previous == {"kind": "local", "value": "2"} and current == {"kind": "local", "value": "2"}:
+            raise ValueError("لا تكرر الفاصل 2 دون رابط مقطع بعده.")
     return {"title": title or None, "sequence": tokens}
 
 

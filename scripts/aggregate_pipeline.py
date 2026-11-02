@@ -1,7 +1,6 @@
 """أدوات بناء فيديو تجميعي من ملفات videos/ وروابط الرسالة."""
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -29,12 +28,22 @@ def download_clip(url: str, out_path: str, cookies_env: str | None) -> None:
 
 def _normalize(input_path: Path, output_path: Path) -> None:
     """يوحّد المقاس والصوت حتى يقبل FFmpeg المقاطع المختلفة في concat."""
-    command = [
-        "ffmpeg", "-y", "-i", str(input_path),
+    audio_probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=index", "-of", "csv=p=0", str(input_path)],
+        capture_output=True, text=True,
+    )
+    has_audio = bool(audio_probe.stdout.strip())
+    command = ["ffmpeg", "-y", "-i", str(input_path)]
+    if not has_audio:
+        command += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+    command += [
+        "-map", "0:v:0", "-map", "1:a:0" if not has_audio else "0:a:0",
         "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,"
                "pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p",
         "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
         "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "160k",
+        "-shortest",
         "-movflags", "+faststart", str(output_path),
     ]
     result = subprocess.run(command, capture_output=True, text=True)

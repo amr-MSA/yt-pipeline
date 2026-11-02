@@ -4,6 +4,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 
 from telegram_utils import parse_aggregate_command
+from youtube_dedupe import request_marker
 
 
 def test_aggregate_preserves_local_and_remote_order():
@@ -45,3 +46,16 @@ def test_aggregate_requires_intro_and_outro():
             pass
         else:
             raise AssertionError("invalid aggregate command was accepted")
+
+
+def test_aggregate_requires_separator_two():
+    try:
+        parse_aggregate_command("/agg 1 https://example.com/a 3")
+    except ValueError as error:
+        assert "الفاصل 2" in str(error)
+    else:
+        raise AssertionError("aggregate without separator was accepted")
+
+
+def test_aggregate_has_stable_supported_dedupe_marker():
+    assert request_marker("aggregate", "7:99") == "#3-7-99"

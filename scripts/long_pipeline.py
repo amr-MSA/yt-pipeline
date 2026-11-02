@@ -148,6 +148,7 @@ def process_aggregate_item(
     bot_token: str,
     youtube,
     uploaded: dict,
+    recent_markers: dict[str, str],
     batch_results: dict[int, list[str]],
     unpublished_results: dict[int, list[str]],
 ) -> None:
@@ -159,11 +160,37 @@ def process_aggregate_item(
     marker = request_marker("aggregate", key)
     try:
         existing = uploaded.get(key)
+        youtube_existing_id = recent_markers.get(marker)
+        if youtube_existing_id:
+            video_url = f"https://youtu.be/{youtube_existing_id}"
+            uploaded[key] = {
+                "status": "succeeded",
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "video_id": youtube_existing_id,
+                "url": item.get("text", ""),
+                "kind": "aggregate",
+                "published_at": int(time.time()),
+                "dedupe_source": "youtube_recent_10",
+            }
+            save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
+            acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
+            batch_results.setdefault(chat_id, []).append(
+                f"⏭️ تم العثور على تجميعة منشورة سابقاً\n📺 YouTube: {video_url}"
+            )
+            return
         if existing and existing.get("status") == "succeeded":
             video_url = f"https://youtu.be/{existing['video_id']}"
             add = batch_results.setdefault(chat_id, [])
             add.append(f"⏭️ تم تأكيد تجميع سابق لهذه الرسالة\n📺 YouTube: {video_url}")
             acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
+            return
+        if existing and existing.get("status") == "upload_unknown":
+            acknowledge_pending_link(STATE_DIR, BOT_NAME, item)
+            batch_results.setdefault(chat_id, []).append(
+                "⚠️ توقف طلب التجميع لأن نتيجة الرفع السابق غير مؤكدة. "
+                "تحقق من YouTube يدوياً قبل إعادة إرسال الطلب."
+            )
             return
 
         work_dir = os.path.join(AGGREGATE_WORK_DIR, str(message_id))
@@ -184,7 +211,8 @@ def process_aggregate_item(
             "title": title,
         }
         save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
-        video_id = upload_video(youtube, final_path, title, DEFAULT_DESCRIPTION)
+        description = append_request_marker(DEFAULT_DESCRIPTION, marker)
+        video_id = upload_video(youtube, final_path, title, description)
         video_url = f"https://youtu.be/{video_id}"
         uploaded[key] = {
             "status": "succeeded",
@@ -337,6 +365,7 @@ def main():
             bot_token,
             youtube,
             uploaded,
+            recent_markers,
             batch_results,
             unpublished_results,
         )
