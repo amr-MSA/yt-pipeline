@@ -36,26 +36,38 @@ def test_aggregate_accepts_unquoted_title_and_mp4_tokens():
     ]
 
 
-def test_aggregate_requires_intro_and_outro():
-    for command in (
-        "/agg https://example.com/a 2 https://example.com/b 3",
-        "/agg 1 https://example.com/a 2 https://example.com/b",
-    ):
+def test_aggregate_accepts_consecutive_youtube_links_without_local_markers():
+    result = parse_aggregate_command(
+        '/agg "تجميعة سكتشات للأسطورة وسام قطب" '
+        "https://youtu.be/MZzghRZsrgk?si=Uwa9DJEW7ozxN52 "
+        "https://youtu.be/sXuMjGfYwIw?si=bvoUSfxa3UD30gl5"
+    )
+    assert result["title"] == "تجميعة سكتشات للأسطورة وسام قطب"
+    assert result["sequence"] == [
+        {"kind": "remote", "value": "https://youtu.be/MZzghRZsrgk?si=Uwa9DJEW7ozxN52"},
+        {"kind": "remote", "value": "https://youtu.be/sXuMjGfYwIw?si=bvoUSfxa3UD30gl5"},
+    ]
+
+
+def test_aggregate_accepts_optional_local_clip_markers():
+    result = parse_aggregate_command(
+        '/agg "عنوان" https://example.com/a 2 https://example.com/b'
+    )
+    assert result["sequence"] == [
+        {"kind": "remote", "value": "https://example.com/a"},
+        {"kind": "local", "value": "2"},
+        {"kind": "remote", "value": "https://example.com/b"},
+    ]
+
+
+def test_aggregate_rejects_missing_remote_link():
+    for command in ("/agg", "/agg 2"):
         try:
             parse_aggregate_command(command)
         except ValueError:
             pass
         else:
-            raise AssertionError("invalid aggregate command was accepted")
-
-
-def test_aggregate_requires_separator_two():
-    try:
-        parse_aggregate_command("/agg 1 https://example.com/a 3")
-    except ValueError as error:
-        assert "الفاصل 2" in str(error)
-    else:
-        raise AssertionError("aggregate without separator was accepted")
+            raise AssertionError("aggregate without a remote URL was accepted")
 
 
 def test_aggregate_has_stable_supported_dedupe_marker():
