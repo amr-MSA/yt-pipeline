@@ -28,6 +28,19 @@ def test_extract_urls_accepts_multiple_platforms_and_cleans_punctuation():
     ]
 
 
+def test_extract_urls_ignores_tiktoklite_promo_but_keeps_video_links():
+    video_url = "https://www.tiktok.com/@naq1ah/video/7686168464377040146"
+    text = (
+        f"{video_url} تتم مشاركة هذا المنشور عبر TikTok Lite. "
+        "نزّل التطبيق: https://www.tiktok.com/tiktoklite/?utm_source=telegram "
+        "https://example.com/tiktoklite"
+    )
+    assert telegram_utils.extract_urls(text) == [
+        video_url,
+        "https://example.com/tiktoklite",
+    ]
+
+
 def test_fetch_all_new_messages_accepts_non_youtube_url():
     update = {
         "update_id": 1,
