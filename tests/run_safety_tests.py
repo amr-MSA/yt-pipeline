@@ -1,11 +1,13 @@
 from pathlib import Path
 import importlib.util
 
-spec = importlib.util.spec_from_file_location("test_long_pipeline_safety", Path(__file__).with_name("test_long_pipeline_safety.py"))
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+TESTS_DIR = Path(__file__).parent
 
-for name in sorted(dir(module)):
-    if name.startswith("test_"):
-        getattr(module, name)()
-        print(f"{name}: OK")
+for path in sorted(TESTS_DIR.glob("test_*.py")):
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for name in sorted(dir(module)):
+        if name.startswith("test_"):
+            getattr(module, name)()
+            print(f"{path.name}:{name}: OK")
