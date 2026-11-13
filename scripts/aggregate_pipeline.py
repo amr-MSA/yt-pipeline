@@ -62,6 +62,26 @@ def _normalize(input_path: Path, output_path: Path) -> None:
         raise RuntimeError(f"فشل توحيد الفيديو {input_path.name}: {result.stderr[-700:]}")
 
 
+def _add_aggregate_watermark(input_path: Path, output_path: Path) -> None:
+    """يضيف علامة القناة إلى ملفات /agg فقط، في زاوية آمنة بخلفية شفافة جزئياً."""
+    watermark = (
+        "drawtext=font=DejaVu Sans:text=@3rabNation:fontsize=26:fontcolor=white:"
+        "box=1:boxcolor=black@0.45:boxborderw=8:x=w-tw-32:y=26"
+    )
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", str(input_path), "-map", "0:v:0", "-map", "0:a:0",
+            "-vf", watermark, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"فشل إضافة علامة /agg المائية: {result.stderr[-900:]}")
+
+
 def build_aggregate_video(
     sequence: list[dict],
     videos_dir: str,
@@ -101,13 +121,15 @@ def build_aggregate_video(
         + "\n",
         encoding="utf-8",
     )
-    output = work / "aggregate_final.mp4"
+    merged = work / "aggregate_merged.mp4"
     result = subprocess.run(
         ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
-         "-c", "copy", "-movflags", "+faststart", str(output)],
+         "-c", "copy", "-movflags", "+faststart", str(merged)],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(f"فشل دمج المقاطع: {result.stderr[-900:]}")
+    output = work / "aggregate_final.mp4"
+    _add_aggregate_watermark(merged, output)
     return str(output)

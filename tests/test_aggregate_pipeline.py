@@ -17,9 +17,9 @@ URLS = [
 ]
 
 
-def _make_clip(path: Path, with_audio: bool, duration: float = 1) -> None:
+def _make_clip(path: Path, with_audio: bool, duration: float = 1, color: str = "blue") -> None:
     command = [
-        "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=blue:s=320x180:d={duration}",
+        "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=320x180:d={duration}",
     ]
     if with_audio:
         command += ["-f", "lavfi", "-i", "sine=frequency=440:duration=0.8"]
@@ -37,6 +37,38 @@ def _duration(path: str) -> float:
         check=True, capture_output=True, text=True,
     )
     return float(result.stdout.strip())
+
+
+def test_aggregate_watermark_is_top_right_legible_and_semitransparent():
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        videos = root / "videos"
+        videos.mkdir()
+        _make_clip(videos / "plain.mp4", with_audio=False, duration=0.7, color="white")
+        output = build_aggregate_video(
+            [{"kind": "local", "value": "plain"}], str(videos), str(root / "work"), None
+        )
+        frame = subprocess.run(
+            ["ffmpeg", "-v", "error", "-ss", "0.3", "-i", output, "-frames:v", "1",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+            check=True, capture_output=True,
+        ).stdout
+        assert len(frame) == 1280 * 720 * 3
+
+        def pixel(x: int, y: int) -> tuple[int, int, int]:
+            offset = (y * 1280 + x) * 3
+            return tuple(frame[offset:offset + 3])
+
+        top_right_gray = sum(
+            1 for y in range(0, 100) for x in range(1000, 1280)
+            if 70 < min(pixel(x, y)) and max(pixel(x, y)) < 210
+        )
+        assert top_right_gray > 500, "لا تظهر خلفية العلامة شبه الشفافة أعلى اليمين"
+        assert min(pixel(100, 100)) > 225, "ظهرت العلامة خارج المنطقة العلوية اليمنى"
+        assert min(pixel(1270, 20)) > 225, "لا يحافظ الصندوق على هامش آمن من الحافة اليمنى"
+        assert min(pixel(1270, 4)) > 225, "لا يحافظ الصندوق على هامش آمن من الحافة العليا"
 
 
 def test_build_aggregate_adds_audio_to_silent_clip():
