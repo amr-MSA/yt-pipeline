@@ -1343,5 +1343,23 @@
     "url": "https://www.instagram.com/reel/DdzmWrzuhLq/?jplx=MW53MXV2Y216NHM3eA==",
     "published_at": 1795116984,
     "deleted": true
+  },
+  "6828354904:573": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 573,
+    "video_id": "pNAHxrH-Z1I",
+    "url": "https://www.instagram.com/reel/DgACzjfIDWT/?bqrl=MW5haW1wM2Vjdmw1Nw==",
+    "published_at": 1795299548,
+    "deleted": true
+  },
+  "6828354904:574": {
+    "status": "succeeded",
+    "chat_id": 6828354904,
+    "message_id": 574,
+    "video_id": "2LTypAxFXF0",
+    "url": "https://www.instagram.com/reel/Df7l4VOsHKr/?knvt=dGlzcmU4b2swYW4y",
+    "published_at": 1795299551,
+    "deleted": true
   }
 }
