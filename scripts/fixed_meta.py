@@ -6,7 +6,7 @@
 """
 import os
 import re
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXED_TITLE_PATH = os.path.join(PROJECT_DIR, "assets", "fixed_title.txt")
@@ -39,18 +39,56 @@ def build_final_title(gemini_title: str) -> str:
 
 def _clean_handle(value: str | None) -> str:
     value = unquote(str(value or "")).strip().strip("/")
+    if "://" in value:
+        parsed = urlparse(value)
+        value = parsed.path.strip("/").split("/", 1)[0] if parsed.path else ""
     if value.startswith("@"):
         value = value[1:]
     return value.strip().strip("/")
 
 
+def _is_instagram_url(url: str) -> bool:
+    host = (urlparse(str(url or "")).hostname or "").lower().removeprefix("www.")
+    return host == "instagram.com" or host.endswith(".instagram.com")
+
+
+def _instagram_handle_from_url(url: str) -> str:
+    """استخرج اسم المستخدم من مسارات Instagram مثل /name/reel/id أو /name/p/id."""
+    if not _is_instagram_url(url):
+        return ""
+    parts = [unquote(part) for part in urlparse(url).path.split("/") if part]
+    if not parts:
+        return ""
+    reserved = {
+        "accounts", "about", "direct", "directory", "emails", "explore",
+        "legal", "press", "privacy", "session", "stories", "tags", "tv",
+        "web", "challenge", "reel", "reels", "p",
+    }
+    candidate = parts[0].lstrip("@")
+    if candidate.lower() in reserved or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", candidate):
+        return ""
+    return candidate
+
+
 def source_handle_from_info(info: dict | None) -> str:
-    """استخرج handle الحساب من بيانات yt-dlp، لا اسم القناة المعروض فقط."""
+    """استخرج handle الحساب من yt-dlp، مع دعم بنية روابط Instagram."""
     info = info or {}
+    webpage_url = str(info.get("webpage_url") or info.get("original_url") or "")
     for key in ("channel_handle", "uploader_id"):
         value = _clean_handle(info.get(key))
         if value and not value.startswith("UC"):
             return value
+
+    if _is_instagram_url(webpage_url):
+        for key in ("uploader", "channel"):
+            value = _clean_handle(info.get(key))
+            if value and re.fullmatch(r"[A-Za-z0-9._]{1,30}", value):
+                return value
+        for key in ("uploader_url", "channel_url", "webpage_url", "original_url"):
+            value = _instagram_handle_from_url(str(info.get(key) or ""))
+            if value:
+                return value
+        return ""
 
     for key in ("channel_url", "uploader_url", "webpage_url"):
         url = str(info.get(key) or "")
@@ -65,8 +103,9 @@ def source_handle_from_info(info: dict | None) -> str:
 def source_attribution(source_handle: str | None = None, source_url: str | None = None) -> str:
     """أنشئ سطر الإسناد المطلوب، مع رابط المصدر إذا تعذر استخراج الـ handle."""
     handle = _clean_handle(source_handle)
+    account_label = "حساب" if _is_instagram_url(source_url or "") else "قناة"
     if handle:
-        return f"📌 المصدر: هذا المقطع مأخوذ من قناة @{handle}."
+        return f"📌 المصدر: هذا المقطع مأخوذ من {account_label} @{handle}."
     if source_url:
         return f"📌 المصدر: هذا المقطع مأخوذ من الحساب الأصلي: {source_url}"
     return "📌 المصدر: هذا المقطع مأخوذ من الحساب الأصلي، والحقوق محفوظة لأصحابه."
