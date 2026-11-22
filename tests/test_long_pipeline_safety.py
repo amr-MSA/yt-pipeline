@@ -425,6 +425,17 @@ def test_instagram_uses_username_url_and_rejects_numeric_account_id():
     assert fixed_meta.source_handle_from_info(info) == "real.creator"
 
 
+def test_aggregate_source_list_preserves_clip_order_and_local_markers():
+    sequence = [
+        {"kind": "remote", "value": "https://www.instagram.com/first.creator/reel/A/"},
+        {"kind": "local", "value": "2"},
+        {"kind": "remote", "value": "https://www.instagram.com/third.creator/p/B/"},
+    ]
+    result = fixed_meta.build_aggregate_source_list(sequence, [{}, {}, {}])
+    assert result.index("المقطع 1: @first.creator") < result.index("المقطع 2: مقطع محلي (2.mp4)")
+    assert result.index("المقطع 2: مقطع محلي (2.mp4)") < result.index("المقطع 3: @third.creator")
+
+
 def test_description_falls_back_to_source_url_without_handle():
     description = fixed_meta.build_final_description("", "", "https://example.com/source")
     assert "https://example.com/source" in description
