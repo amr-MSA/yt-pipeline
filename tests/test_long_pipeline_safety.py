@@ -416,6 +416,15 @@ def test_instagram_metadata_prefers_uploader_id_over_reel_path():
     assert fixed_meta.source_handle_from_info(info) == "actual_owner"
 
 
+def test_instagram_uses_username_url_and_rejects_numeric_account_id():
+    info = {
+        "uploader_id": "987654321012345",
+        "uploader_url": "https://www.instagram.com/real.creator/",
+        "webpage_url": "https://www.instagram.com/real.creator/reel/ABC123/",
+    }
+    assert fixed_meta.source_handle_from_info(info) == "real.creator"
+
+
 def test_description_falls_back_to_source_url_without_handle():
     description = fixed_meta.build_final_description("", "", "https://example.com/source")
     assert "https://example.com/source" in description
