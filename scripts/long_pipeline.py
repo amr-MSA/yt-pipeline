@@ -199,11 +199,13 @@ def process_aggregate_item(
         work_dir = os.path.join(AGGREGATE_WORK_DIR, str(message_id))
         os.makedirs(work_dir, exist_ok=True)
         print(f"[AGG] بناء التجميعة للرسالة {message_id}: {title}", flush=True)
+        source_infos: list[dict] = []
         final_path = build_aggregate_video(
             item["aggregate"]["sequence"],
             VIDEOS_DIR,
             work_dir,
             os.environ.get("YT_COOKIES"),
+            source_infos,
         )
         uploaded[key] = {
             "status": "uploading",
@@ -214,7 +216,12 @@ def process_aggregate_item(
             "title": title,
         }
         save_uploaded_messages(STATE_DIR, BOT_NAME, uploaded)
-        description = append_request_marker(DEFAULT_DESCRIPTION, marker)
+        source_list = fixed_meta.build_aggregate_source_list(
+            item["aggregate"]["sequence"], source_infos
+        )
+        description = append_request_marker(
+            f"{DEFAULT_DESCRIPTION}\n\n{source_list}", marker
+        )
         video_id = upload_video(youtube, final_path, title, description)
         video_url = f"https://youtu.be/{video_id}"
         uploaded[key] = {

@@ -141,3 +141,24 @@ def build_final_description(
     attribution = source_attribution(source_handle, source_url)
     parts = [part for part in (gemini_description.strip(), attribution, fixed) if part]
     return "\n\n".join(parts)[:YOUTUBE_DESCRIPTION_MAX]
+
+
+def build_aggregate_source_list(sequence: list[dict], source_infos: list[dict] | None = None) -> str:
+    """أنشئ قائمة مصادر مرتبة تحافظ على موضع كل رابط داخل التجميعة."""
+    source_infos = source_infos or []
+    lines = ["📌 مصادر المقاطع:"]
+    for index, token in enumerate(sequence, 1):
+        if token.get("kind") == "local":
+            label = f"مقطع محلي ({token.get('value', '')}.mp4)"
+        else:
+            info = dict(source_infos[index - 1]) if index - 1 < len(source_infos) else {}
+            source_url = str(
+                info.get("webpage_url")
+                or info.get("original_url")
+                or token.get("value")
+                or ""
+            )
+            handle = source_handle_from_info({**info, "webpage_url": source_url})
+            label = f"@{handle}" if handle else source_url
+        lines.append(f"المقطع {index}: {label}")
+    return "\n".join(lines)

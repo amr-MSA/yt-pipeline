@@ -9,7 +9,7 @@ import yt_dlp
 from cookie_utils import temporary_cookie_file
 
 
-def download_clip(url: str, out_path: str, cookies_env: str | None) -> None:
+def download_clip(url: str, out_path: str, cookies_env: str | None) -> dict:
     options = {
         "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
         "outtmpl": out_path,
@@ -23,7 +23,7 @@ def download_clip(url: str, out_path: str, cookies_env: str | None) -> None:
         if cookie_path:
             options["cookiefile"] = cookie_path
         with yt_dlp.YoutubeDL(options) as ydl:
-            ydl.extract_info(url, download=True)
+            return ydl.extract_info(url, download=True) or {}
 
 
 def _normalize(input_path: Path, output_path: Path) -> None:
@@ -87,12 +87,15 @@ def build_aggregate_video(
     videos_dir: str,
     work_dir: str,
     cookies_env: str | None,
+    source_infos: list[dict] | None = None,
 ) -> str:
     """يبني ملف mp4 نهائياً ويحافظ على ترتيب sequence كما ورد في الرسالة."""
     videos = Path(videos_dir)
     work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
     normalized: list[Path] = []
+    if source_infos is not None:
+        source_infos.clear()
 
     for index, token in enumerate(sequence):
         source = token["value"]
@@ -104,11 +107,15 @@ def build_aggregate_video(
                 )
         else:
             source_path = work / f"source_{index}.mp4"
-            download_clip(source, str(source_path), cookies_env)
+            info = download_clip(source, str(source_path), cookies_env)
+            if source_infos is not None:
+                source_infos.append(info if isinstance(info, dict) else {})
             if not source_path.is_file():
                 candidates = sorted(work.glob(f"source_{index}.*"))
                 if candidates:
                     source_path = candidates[0]
+        if token["kind"] == "local" and source_infos is not None:
+            source_infos.append({})
         if not source_path.is_file():
             raise FileNotFoundError(f"لم ينتج ملف للفيديو رقم {index + 1}.")
         target = work / f"normalized_{index:03d}.mp4"
