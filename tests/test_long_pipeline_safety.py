@@ -399,6 +399,23 @@ def test_description_attributes_source_handle_and_keeps_rights_notice():
     assert "الحقوق محفوظة" in description
 
 
+def test_instagram_reel_extracts_username_from_webpage_url():
+    info = {"webpage_url": "https://www.instagram.com/example.creator/reel/ABC123/?igsh=token"}
+    assert fixed_meta.source_handle_from_info(info) == "example.creator"
+    description = fixed_meta.build_final_description(
+        "وصف المقطع", fixed_meta.source_handle_from_info(info), info["webpage_url"]
+    )
+    assert "حساب @example.creator" in description
+
+
+def test_instagram_metadata_prefers_uploader_id_over_reel_path():
+    info = {
+        "uploader_id": "actual_owner",
+        "webpage_url": "https://www.instagram.com/reel/ABC123/",
+    }
+    assert fixed_meta.source_handle_from_info(info) == "actual_owner"
+
+
 def test_description_falls_back_to_source_url_without_handle():
     description = fixed_meta.build_final_description("", "", "https://example.com/source")
     assert "https://example.com/source" in description
