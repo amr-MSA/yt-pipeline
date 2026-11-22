@@ -65,30 +65,51 @@ def _instagram_handle_from_url(url: str) -> str:
         "web", "challenge", "reel", "reels", "p",
     }
     candidate = parts[0].lstrip("@")
-    if candidate.lower() in reserved or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", candidate):
+    if (
+        candidate.lower() in reserved
+        or candidate.isdigit()
+        or not re.fullmatch(r"[A-Za-z0-9._]{1,30}", candidate)
+    ):
         return ""
     return candidate
+
+
+def _looks_like_instagram_username(value: str | None) -> bool:
+    value = _clean_handle(value)
+    return bool(
+        value
+        and not value.isdigit()
+        and re.fullmatch(r"[A-Za-z0-9._]{1,30}", value)
+    )
 
 
 def source_handle_from_info(info: dict | None) -> str:
     """استخرج handle الحساب من yt-dlp، مع دعم بنية روابط Instagram."""
     info = info or {}
-    webpage_url = str(info.get("webpage_url") or info.get("original_url") or "")
-    for key in ("channel_handle", "uploader_id"):
-        value = _clean_handle(info.get(key))
-        if value and not value.startswith("UC"):
-            return value
-
-    if _is_instagram_url(webpage_url):
-        for key in ("uploader", "channel"):
-            value = _clean_handle(info.get(key))
-            if value and re.fullmatch(r"[A-Za-z0-9._]{1,30}", value):
-                return value
+    source_urls = tuple(
+        str(info.get(key) or "")
+        for key in ("uploader_url", "channel_url", "webpage_url", "original_url")
+    )
+    if any(_is_instagram_url(url) for url in source_urls):
+        # روابط الحساب هي المصدر الموثوق لاسم المستخدم؛ uploader_id قد يكون
+        # Instagram numeric account ID وليس username.
         for key in ("uploader_url", "channel_url", "webpage_url", "original_url"):
             value = _instagram_handle_from_url(str(info.get(key) or ""))
             if value:
                 return value
+        for key in ("uploader", "channel"):
+            value = _clean_handle(info.get(key))
+            if _looks_like_instagram_username(value):
+                return value
+        value = _clean_handle(info.get("uploader_id"))
+        if _looks_like_instagram_username(value):
+            return value
         return ""
+
+    for key in ("channel_handle", "uploader_id"):
+        value = _clean_handle(info.get(key))
+        if value and not value.startswith("UC"):
+            return value
 
     for key in ("channel_url", "uploader_url", "webpage_url"):
         url = str(info.get(key) or "")
