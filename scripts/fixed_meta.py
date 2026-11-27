@@ -14,6 +14,7 @@ FIXED_DESCRIPTION_PATH = os.path.join(PROJECT_DIR, "assets", "fixed_description.
 
 YOUTUBE_TITLE_MAX = 100
 YOUTUBE_DESCRIPTION_MAX = 4900
+UNKNOWN_USERNAME = "Unknown"
 
 
 def _read_fixed(path: str) -> str:
@@ -83,42 +84,58 @@ def _looks_like_instagram_username(value: str | None) -> bool:
     )
 
 
-def source_handle_from_info(info: dict | None) -> str:
-    """استخرج handle الحساب من yt-dlp، مع دعم بنية روابط Instagram."""
+def _username_from_nested_user(info: dict) -> str:
+    """استخرج username من owner/user/author عند توفر ID واسم المستخدم معًا."""
+    for key in ("user", "owner", "author", "account"):
+        nested = info.get(key)
+        if isinstance(nested, dict):
+            for username_key in ("username", "user_name", "handle", "login"):
+                value = nested.get(username_key)
+                if _looks_like_instagram_username(value):
+                    return _clean_handle(value)
+    return ""
+
+
+def source_username_from_info(info: dict | None) -> str:
+    """استخرج username بالترتيب: URL، metadata، ربط ID ببيانات المستخدم، ثم Unknown."""
     info = info or {}
     source_urls = tuple(
         str(info.get(key) or "")
         for key in ("uploader_url", "channel_url", "webpage_url", "original_url")
     )
-    if any(_is_instagram_url(url) for url in source_urls):
-        # روابط الحساب هي المصدر الموثوق لاسم المستخدم؛ uploader_id قد يكون
-        # Instagram numeric account ID وليس username.
-        for key in ("uploader_url", "channel_url", "webpage_url", "original_url"):
-            value = _instagram_handle_from_url(str(info.get(key) or ""))
-            if value:
-                return value
-        for key in ("uploader", "channel"):
-            value = _clean_handle(info.get(key))
-            if _looks_like_instagram_username(value):
-                return value
-        value = _clean_handle(info.get("uploader_id"))
-        if _looks_like_instagram_username(value):
-            return value
-        return ""
 
-    for key in ("channel_handle", "uploader_id"):
+    # 1) الرابط هو المصدر الأكثر موثوقية لاسم المستخدم.
+    for url in source_urls:
+        value = _instagram_handle_from_url(url) if _is_instagram_url(url) else ""
+        if value:
+            return value
+        match = re.search(r"/(?:@|user/|c/)([^/?#]+)", url)
+        value = _clean_handle(match.group(1)) if match else ""
+        if value and not value.startswith("UC") and not value.isdigit():
+            return value
+
+    # 2) metadata المباشر.
+    for key in (
+        "username", "user_name", "uploader", "channel", "handle",
+        "channel_handle", "uploader_id",
+    ):
         value = _clean_handle(info.get(key))
-        if value and not value.startswith("UC"):
+        if _looks_like_instagram_username(value) and not value.startswith("UC"):
             return value
 
-    for key in ("channel_url", "uploader_url", "webpage_url"):
-        url = str(info.get(key) or "")
-        match = re.search(r"/(?:@|channel/|user/|c/)([^/?#]+)", url)
-        if match:
-            value = _clean_handle(match.group(1))
-            if value and not value.startswith("UC"):
-                return value
-    return ""
+    # 3) ربط ID ببيانات user/owner/author المتداخلة التي يعيدها المصدر.
+    value = _username_from_nested_user(info)
+    if value:
+        return value
+
+    # لا نعيد uploader_id الرقمي؛ فهو ID وليس username.
+    return UNKNOWN_USERNAME
+
+
+def source_handle_from_info(info: dict | None) -> str:
+    """استخرج handle الحساب من yt-dlp، مع دعم بنية روابط Instagram."""
+    username = source_username_from_info(info)
+    return "" if username == UNKNOWN_USERNAME else username
 
 
 def source_attribution(source_handle: str | None = None, source_url: str | None = None) -> str:
@@ -158,7 +175,7 @@ def build_aggregate_source_list(sequence: list[dict], source_infos: list[dict] |
                 or token.get("value")
                 or ""
             )
-            handle = source_handle_from_info({**info, "webpage_url": source_url})
-            label = f"@{handle}" if handle else source_url
+            username = source_username_from_info({**info, "webpage_url": source_url})
+            label = f"@{username}" if username != UNKNOWN_USERNAME else UNKNOWN_USERNAME
         lines.append(f"المقطع {index}: {label}")
     return "\n".join(lines)

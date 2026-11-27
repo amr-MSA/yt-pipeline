@@ -425,6 +425,22 @@ def test_instagram_uses_username_url_and_rejects_numeric_account_id():
     assert fixed_meta.source_handle_from_info(info) == "real.creator"
 
 
+def test_username_resolution_order_is_url_then_metadata_then_nested_user_then_unknown():
+    assert fixed_meta.source_username_from_info({
+        "webpage_url": "https://www.instagram.com/from.url/reel/A/",
+        "uploader": "from_metadata",
+    }) == "from.url"
+    assert fixed_meta.source_username_from_info({
+        "uploader_id": "12345",
+        "uploader": "from_metadata",
+    }) == "from_metadata"
+    assert fixed_meta.source_username_from_info({
+        "uploader_id": "12345",
+        "owner": {"id": "12345", "username": "from_owner"},
+    }) == "from_owner"
+    assert fixed_meta.source_username_from_info({"uploader_id": "12345"}) == "Unknown"
+
+
 def test_aggregate_source_list_preserves_clip_order_and_local_markers():
     sequence = [
         {"kind": "remote", "value": "https://www.instagram.com/first.creator/reel/A/"},
